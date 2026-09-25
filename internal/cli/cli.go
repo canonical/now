@@ -5,19 +5,17 @@ import (
 	"bufio"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 )
 
 // Options is the parsed form of the command line.
 type Options struct {
 	// Request is the natural language request that will be sent to the
-	// model for creating a script that manipulates the paths.
+	// model for creating a script.
 	Request string
 
-	// Sets maps a set number to its ordered list of paths. Set 0 holds the
-	// paths provided before any explicit set name.
-	Sets map[int][]string
+	// Args holds the arguments provided after the request, in order.
+	Args []string
 
 	// With are external command names from $PATH allowed in the script.
 	With []string
@@ -40,21 +38,21 @@ func parseErrf(format string, args ...any) error {
 const usage = `
 Usage:
 
-  now [-y] [-w cmd,...] "<request>" [<path> ...] [1: <path> ...] ...
+  now [-y] [-w cmd,...] "<request>" [<arg> ...]
 
 Arguments:
 
   <request>      Natural language request for operation to perform.
+  <arg>          Arguments made available to the script, in order.
   -y             Auto-approve the generated script without asking.
   -w cmd,...     Comma-separated external command names allowed to the script.
-  -              Reads request or paths from stdin, in the specified position.
-  1-9:           Set name grouping the following paths into that set.
+  -              Reads request or arguments from stdin, in the specified position.
 `
 
 // Parse parses the argument list (without the program name), reading stdin
 // when a "-" placeholder is given.
 func Parse(argv []string, stdin io.Reader) (*Options, error) {
-	opts := &Options{Sets: map[int][]string{}}
+	opts := &Options{}
 
 	rest, err := parseFlags(argv, opts)
 	if err != nil {
@@ -77,10 +75,10 @@ func Parse(argv []string, stdin io.Reader) (*Options, error) {
 
 	if rest[0] == "-" {
 		lines, err := readStdinOnce()
-		if err != nil {
+			if err != nil {
 			return nil, err
 		}
-		if len(lines) == 0 {
+			if len(lines) == 0 {
 			return nil, parseErrf("empty request on stdin")
 		}
 		rest[0] = strings.Join(lines, "\n")
@@ -90,29 +88,16 @@ func Parse(argv []string, stdin io.Reader) (*Options, error) {
 		return nil, parseErrf("empty request")
 	}
 
-	// Current set; 0 is the one before any explicit set name.
-	set := 0
 	for _, arg := range rest[1:] {
 		if arg == "-" {
 			lines, err := readStdinOnce()
 			if err != nil {
 				return nil, err
 			}
-			opts.Sets[set] = append(opts.Sets[set], lines...)
+			opts.Args = append(opts.Args, lines...)
 			continue
 		}
-		if n, ok := parseSetName(arg); ok {
-			if n < 1 || n > 9 {
-				return nil, parseErrf("invalid set name %q: must be 1-9", arg)
-			}
-			if _, dup := opts.Sets[n]; dup {
-				return nil, parseErrf("duplicate set %d", n)
-			}
-			set = n
-			opts.Sets[set] = nil
-			continue
-		}
-		opts.Sets[set] = append(opts.Sets[set], arg)
+		opts.Args = append(opts.Args, arg)
 	}
 
 	return opts, nil
@@ -181,19 +166,4 @@ type HelpRequested struct{}
 
 func (*HelpRequested) Error() string { return usage }
 
-// parseSetName parses a "N:" set name introducer, returning N. Any
-// argument of that form is a set name; anything else is a path. Whether N
-// is a usable set number is the caller's concern.
-func parseSetName(arg string) (n int, ok bool) {
-	if len(arg) < 2 || arg[len(arg)-1] != ':' {
-		return 0, false
-	}
-	digits := arg[:len(arg)-1]
-	for _, c := range digits {
-		if c < '0' || c > '9' {
-			return 0, false
-		}
-	}
-	n, _ = strconv.Atoi(digits)
-	return n, true
-}
+

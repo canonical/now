@@ -33,14 +33,6 @@ mv hello-world.txt hello-there.txt
 $
 ```
 
-# Labeled paths
-
-Sometimes it may be useful to separate the provided paths in two or more named sets. For that, use the the following
-syntax:
-```
-$ now "rename 1 similarly to 2" 1: foo/*some* 2: bar/*some*
-```
-
 # Using stdin
 
 Arguments may be provided via _stdin_ using the classic `-` where the arguments are supposed to be injected.

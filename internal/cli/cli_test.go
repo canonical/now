@@ -34,37 +34,13 @@ func mustParseStdin(t *testing.T, argv []string, stdin string) *cli.Options {
 func TestParseBasic(t *testing.T) {
 	opts := mustParse(t, []string{"change the suffix", "hello-world.txt", "other.txt"})
 	assertEqual(t, "Request", opts.Request, "change the suffix")
-	assertEqual(t, "Sets", opts.Sets, map[int][]string{
-		0: {"hello-world.txt", "other.txt"},
-	})
+	assertEqual(t, "Args", opts.Args, []string{"hello-world.txt", "other.txt"})
 	assertEqual(t, "With", opts.With, []string(nil))
-}
-
-func TestParseSets(t *testing.T) {
-	opts := mustParse(t, []string{"rename 1 like 2", "1:", "foo/a.txt", "2:", "bar/b.txt", "bar/c.txt"})
-	assertEqual(t, "Sets[1]", opts.Sets[1], []string{"foo/a.txt"})
-	assertEqual(t, "Sets[2]", opts.Sets[2], []string{"bar/b.txt", "bar/c.txt"})
-}
-
-func TestParseSetNameInlineIsPath(t *testing.T) {
-	// Only the exact "N:" form is a set name; "1: foo/a.txt" is a path.
-	opts := mustParse(t, []string{"q", "1: foo/a.txt", "b.txt"})
-	assertEqual(t, "Sets[0]", opts.Sets[0], []string{"1: foo/a.txt", "b.txt"})
-	assertEqual(t, "Sets[1]", opts.Sets[1], []string(nil))
-}
-
-func TestParseMixedSetsAndPlain(t *testing.T) {
-	opts := mustParse(t, []string{"q", "plain.txt", "1:", "a.txt", "b.txt"})
-	assertEqual(t, "Sets[0]", opts.Sets[0], []string{"plain.txt"})
-	assertEqual(t, "Sets[1]", opts.Sets[1], []string{"a.txt", "b.txt"})
 }
 
 func TestParseStdin(t *testing.T) {
 	opts := mustParseStdin(t, []string{"q", "-", "a.txt"}, "s1.txt\n\ns2.txt\n")
-	assertEqual(t, "Sets[0]", opts.Sets[0], []string{"s1.txt", "s2.txt", "a.txt"})
-
-	opts = mustParseStdin(t, []string{"q", "1:", "-", "a.txt"}, "s1.txt\n")
-	assertEqual(t, "Sets[1]", opts.Sets[1], []string{"s1.txt", "a.txt"})
+	assertEqual(t, "Args", opts.Args, []string{"s1.txt", "s2.txt", "a.txt"})
 }
 
 func TestParseStdinSinglePlaceholderOnly(t *testing.T) {
@@ -77,7 +53,7 @@ func TestParseStdinSinglePlaceholderOnly(t *testing.T) {
 func TestParseStdinRequest(t *testing.T) {
 	opts := mustParseStdin(t, []string{"-", "a.txt"}, "the request\n")
 	assertEqual(t, "Request", opts.Request, "the request")
-	assertEqual(t, "Sets[0]", opts.Sets[0], []string{"a.txt"})
+	assertEqual(t, "Args", opts.Args, []string{"a.txt"})
 
 	// Multi-line requests are joined with newlines.
 	opts = mustParseStdin(t, []string{"-", "a.txt"}, "rename these files\nlike set 2\n")
@@ -101,7 +77,7 @@ func TestParseRequestOnly(t *testing.T) {
 	// Paths are optional; a request alone is valid.
 	opts := mustParse(t, []string{"just generate something"})
 	assertEqual(t, "Request", opts.Request, "just generate something")
-	assertEqual(t, "Sets", opts.Sets, map[int][]string{})
+	assertEqual(t, "Args", opts.Args, []string(nil))
 }
 
 func TestParseYesFlag(t *testing.T) {
@@ -120,7 +96,7 @@ func TestParseYesFlag(t *testing.T) {
 	if opts.Yes {
 		t.Errorf("-y after request: Yes = true, want false")
 	}
-	assertEqual(t, "Sets[0]", opts.Sets[0], []string{"-y"})
+	assertEqual(t, "Args", opts.Args, []string{"-y"})
 }
 
 func TestParseErrors(t *testing.T) {
@@ -133,7 +109,6 @@ func TestParseErrors(t *testing.T) {
 		{"unknown flag", []string{"-x", "q", "a.txt"}},
 		{"-w missing value", []string{"-w"}},
 		{"-w empty name", []string{"-w", "curl,,jq", "q", "a.txt"}},
-		{"duplicate set", []string{"q", "1:", "a", "1:", "b"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -152,7 +127,7 @@ func TestParseFlagAfterRequestIsPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertEqual(t, "Sets[0]", opts.Sets[0], []string{"-w", "a.txt"})
+	assertEqual(t, "Args", opts.Args, []string{"-w", "a.txt"})
 }
 
 func TestParseHelp(t *testing.T) {
@@ -165,27 +140,9 @@ func TestParseHelp(t *testing.T) {
 	}
 }
 
-func TestSetsRestrictedToDigits(t *testing.T) {
-	// Only the exact "N:" form introduces a set.
-	opts := mustParse(t, []string{"q", "9:", "b.txt", "1:", "foo:", "x/y:"})
-	assertEqual(t, "Sets[9]", opts.Sets[9], []string{"b.txt"})
-	assertEqual(t, "Sets[1]", opts.Sets[1], []string{"foo:", "x/y:"})
-}
-
-func TestAmbiguousSetNamesRejected(t *testing.T) {
-	// Any "N:" form is a set name; N < 1 or N > 9 is rejected rather than
-	// silently treated as a path.
-	for _, arg := range []string{"0:", "10:", "42:"} {
-		_, err := cli.Parse([]string{"q", "a.txt", arg}, strings.NewReader(""))
-		if err == nil || !strings.Contains(err.Error(), "invalid set name") {
-			t.Errorf("Parse with %q: expected invalid set name error, got %v", arg, err)
-		}
-	}
-}
-
-func TestSetNameLikePathsAccepted(t *testing.T) {
-	// Arguments with content after the colon are ordinary paths.
-	opts := mustParse(t, []string{"q", "9: b.txt", "1: foo/a.txt", "1::"})
-	assertEqual(t, "Sets[0]", opts.Sets[0], []string{"9: b.txt", "1: foo/a.txt", "1::"})
+func TestColonArgumentsArePaths(t *testing.T) {
+	// With no set syntax, colon-containing arguments are ordinary paths.
+	opts := mustParse(t, []string{"q", "9:", "b.txt", "1: foo/a.txt", "1::", "0:", "10:"})
+	assertEqual(t, "Args", opts.Args, []string{"9:", "b.txt", "1: foo/a.txt", "1::", "0:", "10:"})
 }
 
