@@ -9,17 +9,20 @@ import (
 	"strings"
 )
 
-// Config holds the settings used to reach the OpenAI-compatible API.
+// Options holds the settings used to reach the model API.
 type Options struct {
 	APIURL   string
 	APIKey   string
 	APIModel string
+	// APIType selects the API kind; only "completions-v1" (the completions API)
+	// is supported for now.
+	APIType string
 }
 
 // Load reads the configuration from $HOME/.now. Missing keys get their
 // defaults; api-url is required.
 func Load() (*Options, error) {
-	opts := &Options{APIModel: "local"}
+	opts := &Options{APIModel: "default", APIType: "completions-v1"}
 
 	home, err := os.UserHomeDir()
 	if err != nil {
@@ -52,6 +55,8 @@ func Load() (*Options, error) {
 			opts.APIKey = value
 		case "api-model":
 			opts.APIModel = value
+		case "api-type":
+			opts.APIType = value
 		default:
 			return nil, fmt.Errorf("cannot parse %s: unknown key %q", path, key)
 		}
@@ -61,6 +66,9 @@ func Load() (*Options, error) {
 	}
 	if opts.APIURL == "" {
 		return nil, fmt.Errorf("cannot load %s: api-url is not set", path)
+	}
+	if opts.APIType != "completions-v1" {
+		return nil, fmt.Errorf("cannot load %s: unsupported api-type %q", path, opts.APIType)
 	}
 	return opts, nil
 }

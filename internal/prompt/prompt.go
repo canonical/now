@@ -8,8 +8,8 @@ import (
 
 // Message is one entry of the chat completion request.
 type Message struct {
-	Role    string
-	Content string
+	Role    string `json:"role"`
+	Content string `json:"content"`
 }
 
 // BuildOptions carries everything the prompt needs.

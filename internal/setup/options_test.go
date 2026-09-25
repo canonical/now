@@ -47,7 +47,7 @@ func TestLoadMissingAPIURL(t *testing.T) {
 }
 
 func TestLoadFullConfig(t *testing.T) {
-	withHome(t, "api-url=http://127.0.0.1:11434\napi-key=abc...\napi-model=llama3.1:8b\n")
+	withHome(t, "api-url=http://127.0.0.1:11434\napi-key=abc...\napi-model=foobar\n")
 	cfg, err := setup.Load()
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -55,7 +55,8 @@ func TestLoadFullConfig(t *testing.T) {
 	assertEqual(t, "Options", *cfg, setup.Options{
 		APIURL:   "http://127.0.0.1:11434",
 		APIKey:   "abc...",
-		APIModel: "llama3.1:8b",
+		APIModel: "foobar",
+		APIType:  "completions-v1",
 	})
 }
 
@@ -65,8 +66,17 @@ func TestLoadDefaults(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertEqual(t, "APIModel", cfg.APIModel, "local")
+	assertEqual(t, "APIModel", cfg.APIModel, "default")
+	assertEqual(t, "APIType", cfg.APIType, "completions-v1")
 	assertEqual(t, "APIKey", cfg.APIKey, "")
+}
+
+func TestLoadUnsupportedAPIType(t *testing.T) {
+	withHome(t, "api-url=http://x\napi-type=other\n")
+	_, err := setup.Load()
+	if err == nil || !strings.Contains(err.Error(), "unsupported api-type") {
+		t.Fatalf("expected api-type error, got %v", err)
+	}
 }
 
 func TestLoadWhitespaceAndComments(t *testing.T) {

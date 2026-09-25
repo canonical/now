@@ -51,9 +51,11 @@ The configuration is loaded from `$HOME/.now` using a simple _key=value_ format:
 ```
 api-url=http://127.0.0.1:11434
 api-key=abc...
-api-model=local
+api-model=default
+api-type=completions-v1
 ```
-The `api-model` key selects the model name sent to the API. It defaults to `local` if unset.
+The `api-model` key selects the model name sent to the API. It defaults to `default` if unset.
+The `api-type` key selects the API kind; only `completions-v1` is supported for now, and it is the default, so the key may be omitted.
 
 # Execution environment
 
