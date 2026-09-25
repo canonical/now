@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/niemeyer/now/internal/cli"
+	"github.com/niemeyer/now/internal/setup"
 )
 
 func main() {
@@ -27,8 +28,12 @@ func run(argv []string) error {
 		}
 		return err
 	}
+	_, err = setup.Load()
+	if err != nil {
+		return err
+	}
 	_ = opts
-	// Phases 2-9 are implemented in later steps.
+	// Phases 3-9 are implemented in later steps.
 	return errors.New("not implemented yet")
 }
 

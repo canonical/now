@@ -128,7 +128,7 @@ func readStdin(r io.Reader) ([]string, error) {
 		}
 	}
 	if err := sc.Err(); err != nil {
-		return nil, parseErrf("reading stdin: %v", err)
+			return nil, parseErrf("cannot read stdin: %v", err)
 	}
 	return lines, nil
 }

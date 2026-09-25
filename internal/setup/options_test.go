@@ -1,0 +1,99 @@
+package setup_test
+
+import (
+	"os"
+	"path/filepath"
+	"reflect"
+	"strings"
+	"testing"
+
+	"github.com/niemeyer/now/internal/setup"
+)
+
+func assertEqual[T any](t *testing.T, label string, got, want T) {
+	t.Helper()
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("%s = %#v, want %#v", label, got, want)
+	}
+}
+
+// withHome points $HOME at a temp dir for the test and restores it after.
+func withHome(t *testing.T, content string) string {
+	t.Helper()
+	dir := t.TempDir()
+	if content != "" {
+		if err := os.WriteFile(filepath.Join(dir, ".now"), []byte(content), 0o600); err != nil {
+			t.Fatalf("writing config: %v", err)
+		}
+	}
+	t.Setenv("HOME", dir)
+	return dir
+}
+
+func TestLoadMissingFile(t *testing.T) {
+	withHome(t, "")
+	_, err := setup.Load()
+	if err == nil || !strings.Contains(err.Error(), "cannot open") {
+		t.Fatalf("expected open error, got %v", err)
+	}
+}
+
+func TestLoadMissingAPIURL(t *testing.T) {
+	withHome(t, "api-key=abc...\n")
+	_, err := setup.Load()
+	if err == nil || !strings.Contains(err.Error(), "api-url is not set") {
+		t.Fatalf("expected api-url error, got %v", err)
+	}
+}
+
+func TestLoadFullConfig(t *testing.T) {
+	withHome(t, "api-url=http://127.0.0.1:11434\napi-key=abc...\napi-model=llama3.1:8b\n")
+	cfg, err := setup.Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "Options", *cfg, setup.Options{
+		APIURL:   "http://127.0.0.1:11434",
+		APIKey:   "abc...",
+		APIModel: "llama3.1:8b",
+	})
+}
+
+func TestLoadDefaults(t *testing.T) {
+	withHome(t, "api-url=http://127.0.0.1:11434\n")
+	cfg, err := setup.Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "APIModel", cfg.APIModel, "local")
+	assertEqual(t, "APIKey", cfg.APIKey, "")
+}
+
+func TestLoadWhitespaceAndComments(t *testing.T) {
+	withHome(t, "# comment\n\n  api-url = http://x  \n")
+	cfg, err := setup.Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "APIURL", cfg.APIURL, "http://x")
+}
+
+func TestLoadErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    string
+	}{
+		{"malformed line", "api-url\n", "malformed line"},
+		{"unknown key", "api-toke=x\n", "unknown key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			withHome(t, tt.content)
+			_, err := setup.Load()
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("expected error containing %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
