@@ -8,10 +8,11 @@ import (
 
 	"github.com/niemeyer/now/internal/api/completions"
 	"github.com/niemeyer/now/internal/prompt"
+	"github.com/niemeyer/now/internal/setup"
 )
 
-func clientOpts(url string) completions.Options {
-	return completions.Options{URL: url, Key: "s3cr3t", Model: "test-model"}
+func clientOpts(url string) setup.Options {
+	return setup.Options{APIURL: url, APIKey: "s3cr3t", APIModel: "test-model"}
 }
 
 var testMessages = []prompt.Message{
@@ -42,7 +43,7 @@ func TestCompleteHTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := completions.Complete(completions.Options{URL: srv.URL, Model: "m"}, testMessages)
+	_, err := completions.Complete(setup.Options{APIURL: srv.URL, APIModel: "m"}, testMessages)
 	if err == nil || !strings.Contains(err.Error(), "500") {
 		t.Fatalf("expected HTTP error, got %v", err)
 	}
@@ -54,7 +55,7 @@ func TestCompleteMalformedJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := completions.Complete(completions.Options{URL: srv.URL, Model: "m"}, testMessages)
+	_, err := completions.Complete(setup.Options{APIURL: srv.URL, APIModel: "m"}, testMessages)
 	if err == nil || !strings.Contains(err.Error(), "cannot parse response") {
 		t.Fatalf("expected parse error, got %v", err)
 	}
@@ -66,14 +67,14 @@ func TestCompleteNoChoices(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := completions.Complete(completions.Options{URL: srv.URL, Model: "m"}, testMessages)
+	_, err := completions.Complete(setup.Options{APIURL: srv.URL, APIModel: "m"}, testMessages)
 	if err == nil || !strings.Contains(err.Error(), "no choices") {
 		t.Fatalf("expected no-choices error, got %v", err)
 	}
 }
 
 func TestCompleteUnreachable(t *testing.T) {
-	_, err := completions.Complete(completions.Options{URL: "http://127.0.0.1:1", Model: "m"}, testMessages)
+	_, err := completions.Complete(setup.Options{APIURL: "http://127.0.0.1:1", APIModel: "m"}, testMessages)
 	if err == nil || !strings.Contains(err.Error(), "cannot reach") {
 		t.Fatalf("expected reach error, got %v", err)
 	}
