@@ -80,6 +80,19 @@ func TestRunNoTerminalRejects(t *testing.T) {
 	}
 }
 
+func TestRunTrace(t *testing.T) {
+	// -x threads through to the executed script: commands are traced
+	// to stderr, stdout still gets only the script's output.
+	stdout, stderr, err := e2e(t, []string{"-y", "-x", "do something"}, "SCRIPT\necho hello\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", stdout, "hello\n")
+	if !strings.Contains(stderr, "+ echo hello") {
+		t.Errorf("missing trace in stderr: %q", stderr)
+	}
+}
+
 func TestRunErrorReply(t *testing.T) {
 	// The model's ERROR reason flows through the whole cycle unchanged.
 	_, _, err := e2e(t, []string{"do something"}, "ERROR cannot do that")

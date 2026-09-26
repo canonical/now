@@ -84,5 +84,6 @@ func Run(ctx context.Context, opts RunOptions) error {
 		Args:   parsed.Args,
 		Stdout: opts.Stdout,
 		Stderr: opts.Stderr,
+		Trace:  parsed.Trace,
 	})
 }

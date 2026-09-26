@@ -26,6 +26,10 @@ type Options struct {
 	// Quiet auto-approves like Yes, and also hides the script before
 	// running it.
 	Quiet bool
+
+	// Trace prints each script command to stderr as it executes,
+	// like the shell's -x.
+	Trace bool
 }
 
 // ParseError is returned for invalid command lines; its message is meant to
@@ -38,20 +42,42 @@ func parseErrf(format string, args ...any) error {
 	return &ParseError{msg: fmt.Sprintf(format, args...)}
 }
 
-// usage is shown when no arguments are given or -h is used.
-const usage = `
-Usage:
+// usage is shown when --help is used.
+const usage = `Usage:
 
-  now [-y] [-q] [-w cmd,...] "<request>" [<arg> ...]
+  now [-y] [-q] [-x] [-w cmd,...] "<request>" [<arg> ...]
 
-Arguments:
+  Arguments:
 
-  <request>      Natural language request for operation to perform.
-  <arg>          Arguments made available to the script, in order.
-  -y             Auto-approve the generated script without asking.
-  -q             Auto-approve and also hide the script before running it.
-  -w cmd,...     Comma-separated external command names allowed to the script.
-  -              Reads request or arguments from stdin, in the specified position.
+  <request>    Natural language request for operation to perform.
+  <arg>        Data made available to the model and script, in order.
+  -            Reads either the request or the arguments from stdin.
+  -y           Auto-approve the generated script without asking.
+  -q           Auto-approve and also hide the script before running it.
+  -x           Print each script command to stderr as it executes.
+  -w cmd,...   Comma-separated external command names allowed for the script.
+
+The now command generates a shell script to perform the requested
+operation, prints it for approval, and then executes it in busybox.
+An LLM model is used to genereate the script while only having access
+to the information explicitly provided via arguments and stdin. No
+tool calls, no multiple turns, no local access, the LLM must one-shot it
+with the context provided.
+
+Arguments and standard input lines are flattened into a single ordered
+sequence that is made available to the model and the script in "$@".
+
+$ echo f1 f2 | ./now "cp [foo] files to [bar] dirs" [foo] - [bar] /d1 /d2
+for f in f1 f2; do
+  for d in /d1 /d2; do
+    cp "$f" "$d/"
+  done
+done
+[ ENTER | CTRL-C ]
+
+The key to the success when using now is realizing that arguments have no
+explicit meaning. It's up to the request and the model to define it, and most
+often the model can tell what is meant with no further help. 
 `
 
 // Parse parses the argument list (without the program name), reading stdin
@@ -64,7 +90,7 @@ func Parse(argv []string, stdin io.Reader) (*Options, error) {
 		return nil, err
 	}
 	if len(rest) == 0 {
-		return nil, parseErrf("missing request\n\n%s", usage)
+		return nil, parseErrf("missing request")
 	}
 
 	// Exactly one "-" placeholder is allowed, either as the request or as
@@ -135,6 +161,8 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 			opts.Yes = true
 		case arg == "-q":
 			opts.Quiet = true
+		case arg == "-x":
+			opts.Trace = true
 		case arg == "-w":
 			if i+1 >= len(argv) {
 				return nil, parseErrf("-w requires a comma-separated list of commands")

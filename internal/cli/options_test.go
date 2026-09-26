@@ -80,6 +80,25 @@ func TestParseRequestOnly(t *testing.T) {
 	assertEqual(t, "Args", opts.Args, []string(nil))
 }
 
+func TestParseTraceFlag(t *testing.T) {
+	opts := mustParse(t, []string{"-x", "q", "a.txt"})
+	if !opts.Trace {
+		t.Errorf("-x: Trace = false, want true")
+	}
+
+	opts = mustParse(t, []string{"q", "a.txt"})
+	if opts.Trace {
+		t.Errorf("without -x: Trace = true, want false")
+	}
+
+	// -x after the request is a path, not a flag.
+	opts = mustParse(t, []string{"q", "-x"})
+	if opts.Trace {
+		t.Errorf("-x after request: Trace = true, want false")
+	}
+	assertEqual(t, "Args", opts.Args, []string{"-x"})
+}
+
 func TestParseYesFlag(t *testing.T) {
 	opts := mustParse(t, []string{"-y", "q", "a.txt"})
 	if !opts.Yes {
@@ -106,7 +125,7 @@ func TestParseErrors(t *testing.T) {
 	}{
 		{"no args", nil},
 		{"empty request", []string{"  ", "a.txt"}},
-		{"unknown flag", []string{"-x", "q", "a.txt"}},
+		{"unknown flag", []string{"-z", "q", "a.txt"}},
 		{"-w missing value", []string{"-w"}},
 		{"-w empty name", []string{"-w", "curl,,jq", "q", "a.txt"}},
 	}

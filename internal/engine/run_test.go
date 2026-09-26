@@ -46,6 +46,23 @@ func TestRunStderr(t *testing.T) {
 	assertEqual(t, "stderr", errOut.String(), "err\n")
 }
 
+func TestRunTrace(t *testing.T) {
+	// -x prints each command to stderr as it executes.
+	var out, errOut bytes.Buffer
+	err := engine.Run(context.Background(), "echo hi", engine.RunOptions{
+		Stdout: &out,
+		Stderr: &errOut,
+		Trace:  true,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", out.String(), "hi\n")
+	if !strings.Contains(errOut.String(), "+ echo hi") {
+		t.Errorf("missing trace output: %q", errOut.String())
+	}
+}
+
 func TestRunCanceled(t *testing.T) {
 	// A canceled context kills the running script.
 	ctx, cancel := context.WithCancel(context.Background())

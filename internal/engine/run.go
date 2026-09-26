@@ -15,6 +15,9 @@ type RunOptions struct {
 	// Stdout and Stderr receive the script output.
 	Stdout io.Writer
 	Stderr io.Writer
+	// Trace prints each command to Stderr as it executes, like the
+	// shell's -x.
+	Trace bool
 }
 
 // busyboxPath returns the busybox path for running scripts via ash. The
@@ -35,7 +38,13 @@ func Run(ctx context.Context, script string, opts RunOptions) error {
 		return err
 	}
 
-	cmd := exec.CommandContext(ctx, busybox, "sh", "-s")
+	shellArgs := []string{"sh"}
+	if opts.Trace {
+		shellArgs = append(shellArgs, "-x")
+	}
+	shellArgs = append(shellArgs, "-s")
+
+	cmd := exec.CommandContext(ctx, busybox, shellArgs...)
 	cmd.Args = append(cmd.Args, opts.Args...)
 	cmd.Stdin = strings.NewReader(script)
 	cmd.Stdout = opts.Stdout
