@@ -1,39 +1,25 @@
 // Command now generates a one-shot script from a request and runs it
-// after user approval, confined to the provided paths.
+// after user approval.
 package main
 
 import (
-	"errors"
+	"context"
 	"fmt"
 	"os"
 
 	"github.com/niemeyer/now/internal/cli"
-	"github.com/niemeyer/now/internal/setup"
 )
 
 func main() {
-	if err := run(os.Args[1:]); err != nil {
-		fmt.Fprintln(os.Stderr, "now:", err)
+	err := cli.Run(context.Background(), cli.RunOptions{
+		Argv:   os.Args[1:],
+		Stdin:  os.Stdin,
+		Stdout: os.Stdout,
+		Stderr: os.Stderr,
+	})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)
 	}
-}
-
-func run(argv []string) error {
-	opts, err := cli.Parse(argv, os.Stdin)
-	if err != nil {
-		var help *cli.HelpRequested
-		if errors.As(err, &help) {
-			fmt.Fprintln(os.Stderr, err)
-			return nil
-		}
-		return err
-	}
-	_, err = setup.Load()
-	if err != nil {
-		return err
-	}
-	_ = opts
-	// Phases 3-9 are implemented in later steps.
-	return errors.New("not implemented yet")
 }
 

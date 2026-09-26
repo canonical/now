@@ -28,9 +28,9 @@ func TestBuildWithArgs(t *testing.T) {
 		Request: "rename these",
 		Args:    []string{"a.txt", "b.txt"},
 	})
-	want := "## REQUEST\nrename these\n\n## REQUEST DATA\n```\n=a.txt\n=b.txt\n```\n" +
-		"The first character of each line is not part of the data: `=` means the line is precise, and ! means unprintable characters were replaced by `?` inside that line.\n" +
-		"These lines may be accessed by the script in \"$@\" or as literal strings, whichever makes the script simple and clear.\n"
+	want := "## REQUEST\nrename these\n\n## REQUEST DATA\n```\na.txt\nb.txt\n```\n" +
+		"These lines may be accessed by the script in \"$@\" or as literal strings, whichever makes the script simple and clear.\n" +
+		"Note that any \uFFFD above replaces a non-printable character, but for the script the real string is available in \"$@\".\n"
 	assertEqual(t, "user content", msgs[1].Content, want)
 }
 
@@ -46,9 +46,10 @@ func TestBuildArgSanitization(t *testing.T) {
 		Request: "handle these",
 		Args:    []string{"plain.txt", "with\ttab", "with\nnewline", "héllo"},
 	})
-	// Precise arguments keep the `=` prefix, including non-ASCII printables.
-	// Unprintable characters switch the line to `!` with `?` replacements.
-	want := "## REQUEST DATA\n```\n=plain.txt\n!with?tab\n!with?newline\n=héllo\n```\n"
+	// Printable arguments, including non-ASCII, pass through; unprintable
+	// characters are replaced by the replacement rune, and the note tells
+	// the model the real strings are in "$@".
+	want := "## REQUEST DATA\n```\nplain.txt\nwith\uFFFDtab\nwith\uFFFDnewline\nhéllo\n```\n"
 	if !strings.Contains(msgs[1].Content, want) {
 		t.Errorf("data section = %q, want to contain %q", msgs[1].Content, want)
 	}

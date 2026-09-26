@@ -1,6 +1,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os/exec"
@@ -28,13 +29,13 @@ func busyboxPath() (string, error) {
 }
 
 // Run executes the script with the arguments in "$@".
-func Run(script string, opts RunOptions) error {
+func Run(ctx context.Context, script string, opts RunOptions) error {
 	busybox, err := busyboxPath()
 	if err != nil {
 		return err
 	}
 
-	cmd := exec.Command(busybox, "sh", "-s")
+	cmd := exec.CommandContext(ctx, busybox, "sh", "-s")
 	cmd.Args = append(cmd.Args, opts.Args...)
 	cmd.Stdin = strings.NewReader(script)
 	cmd.Stdout = opts.Stdout

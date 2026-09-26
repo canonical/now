@@ -2,6 +2,7 @@
 package engine
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -15,18 +16,18 @@ type GenerateOptions struct {
 	With    []string
 	// Complete dispatches the prompt messages to the model API chosen
 	// by the caller and returns its reply.
-	Complete func(messages []prompt.Message) (string, error)
+	Complete func(ctx context.Context, messages []prompt.Message) (string, error)
 }
 
 // Generate assembles the prompt for the request and returns the script
 // produced by the model.
-func Generate(opts GenerateOptions) (string, error) {
+func Generate(ctx context.Context, opts GenerateOptions) (string, error) {
 	messages := prompt.Build(prompt.BuildOptions{
 		Request: opts.Request,
 		Args:    opts.Args,
 		With:    opts.With,
 	})
-	reply, err := opts.Complete(messages)
+	reply, err := opts.Complete(ctx, messages)
 	if err != nil {
 		return "", err
 	}

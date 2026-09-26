@@ -3,6 +3,7 @@ package completions
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -30,13 +31,13 @@ type response struct {
 
 // Complete sends the messages to the API described by opts and returns the
 // content of the first choice.
-func Complete(opts setup.Options, messages []prompt.Message) (string, error) {
+func Complete(ctx context.Context, opts setup.Options, messages []prompt.Message) (string, error) {
 	body, err := json.Marshal(request{Model: opts.APIModel, Messages: messages})
 	if err != nil {
 		return "", fmt.Errorf("cannot encode request: %w", err)
 	}
 
-	req, err := http.NewRequest(http.MethodPost, strings.TrimSuffix(opts.APIURL, "/")+"/v1/chat/completions", bytes.NewReader(body))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, strings.TrimSuffix(opts.APIURL, "/")+"/v1/chat/completions", bytes.NewReader(body))
 	if err != nil {
 		return "", fmt.Errorf("cannot create request: %w", err)
 	}

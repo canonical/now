@@ -44,7 +44,8 @@ echo 'Hello world'
 ` + fence + `
 3. You have ONE chance: completely solve the request with SCRIPT, or fail with ERROR.
 4. Use ONLY the explicitly allowed command line tools.
-5. Solve the task in a simple, clean, readable way, what an experienced professional would do.
+5. DO NOT USE path wildcards unless you are unequivocally sure only the requested paths will be affected.
+6. Solve the task in a simple, clean, readable way, what an experienced professional would do.
 `
 
 const busyboxBuiltins = `
@@ -78,8 +79,8 @@ func Build(opts BuildOptions) []Message {
 			user.WriteString("\n")
 		}
 		user.WriteString("```\n" +
-			"The first character of each line is not part of the data: `=` means the line is precise, and ! means unprintable characters were replaced by `?` inside that line.\n" +
-			"These lines may be accessed by the script in \"$@\" or as literal strings, whichever makes the script simple and clear.\n")
+			"These lines may be accessed by the script in \"$@\" or as literal strings, whichever makes the script simple and clear.\n" +
+			"Note that any � above replaces a non-printable character, but for the script the real string is available in \"$@\".\n")
 	}
 
 	return []Message{
@@ -90,16 +91,15 @@ func Build(opts BuildOptions) []Message {
 
 // sanitizeArg renders one argument as a REQUEST DATA line, prefixed with `=`
 // when the text is precise, or `!` when unprintable characters had to be
-// replaced by `?`.
+// replaced by `�`.
 func sanitizeArg(arg string) string {
 	if isPrintable(arg) {
-		return "=" + arg
+		return arg
 	}
 	var b strings.Builder
-	b.WriteString("!")
 	for _, r := range arg {
-		if r == '\n' || !unicode.IsPrint(r) {
-			b.WriteString("?")
+		if r == '\n' || r == '\r' || !unicode.IsPrint(r) {
+			b.WriteString("�")
 			continue
 		}
 		b.WriteRune(r)

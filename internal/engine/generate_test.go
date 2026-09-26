@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	"context"
 	"github.com/niemeyer/now/internal/api/completions"
 	"github.com/niemeyer/now/internal/engine"
 	"github.com/niemeyer/now/internal/prompt"
@@ -27,11 +28,11 @@ func generate(t *testing.T, reply string) (string, error) {
 	}
 	t.Cleanup(func() { _ = f.Stop() })
 	opts := setup.Options{APIURL: url, APIModel: "test"}
-	return engine.Generate(engine.GenerateOptions{
-		Request:  "do something",
-		Args:     []string{"a.txt"},
-		Complete: func(messages []prompt.Message) (string, error) {
-			return completions.Complete(opts, messages)
+	return engine.Generate(context.Background(), engine.GenerateOptions{
+		Request: "do something",
+		Args:    []string{"a.txt"},
+		Complete: func(ctx context.Context, messages []prompt.Message) (string, error) {
+			return completions.Complete(ctx, opts, messages)
 		},
 	})
 }
@@ -146,4 +147,3 @@ func TestGenerateUnexpectedReply(t *testing.T) {
 		t.Fatalf("expected unexpected-output error, got %v", err)
 	}
 }
-

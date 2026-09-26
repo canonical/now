@@ -22,6 +22,10 @@ type Options struct {
 
 	// Yes auto-approves the generated script.
 	Yes bool
+
+	// Quiet auto-approves like Yes, and also hides the script before
+	// running it.
+	Quiet bool
 }
 
 // ParseError is returned for invalid command lines; its message is meant to
@@ -38,13 +42,14 @@ func parseErrf(format string, args ...any) error {
 const usage = `
 Usage:
 
-  now [-y] [-w cmd,...] "<request>" [<arg> ...]
+  now [-y] [-q] [-w cmd,...] "<request>" [<arg> ...]
 
 Arguments:
 
   <request>      Natural language request for operation to perform.
   <arg>          Arguments made available to the script, in order.
   -y             Auto-approve the generated script without asking.
+  -q             Auto-approve and also hide the script before running it.
   -w cmd,...     Comma-separated external command names allowed to the script.
   -              Reads request or arguments from stdin, in the specified position.
 `
@@ -128,6 +133,8 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 			return nil, &HelpRequested{}
 		case arg == "-y":
 			opts.Yes = true
+		case arg == "-q":
+			opts.Quiet = true
 		case arg == "-w":
 			if i+1 >= len(argv) {
 				return nil, parseErrf("-w requires a comma-separated list of commands")

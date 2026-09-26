@@ -107,3 +107,30 @@ func TestLoadErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadFrom(t *testing.T) {
+	// LoadFrom reads an arbitrary path, independent of $HOME.
+	path := filepath.Join(t.TempDir(), "custom-now")
+	content := "api-url=http://127.0.0.1:1234\napi-model=mymodel\n"
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("writing config: %v", err)
+	}
+
+	cfg, err := setup.LoadFrom(path)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "Options", *cfg, setup.Options{
+		APIURL:   "http://127.0.0.1:1234",
+		APIModel: "mymodel",
+		APIType:  "completions-v1",
+	})
+}
+
+func TestLoadFromMissingFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "missing")
+	_, err := setup.LoadFrom(path)
+	if err == nil || !strings.Contains(err.Error(), "cannot open "+path) {
+		t.Fatalf("expected open error for %s, got %v", path, err)
+	}
+}

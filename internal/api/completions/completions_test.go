@@ -1,6 +1,7 @@
 package completions_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -22,7 +23,7 @@ var testMessages = []prompt.Message{
 
 func TestCompleteSuccess(t *testing.T) {
 	f, url := startFake(t, "SCRIPT\necho hi")
-	got, err := completions.Complete(clientOpts(url), testMessages)
+	got, err := completions.Complete(context.Background(), clientOpts(url), testMessages)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -43,7 +44,7 @@ func TestCompleteHTTPError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := completions.Complete(setup.Options{APIURL: srv.URL, APIModel: "m"}, testMessages)
+	_, err := completions.Complete(context.Background(), setup.Options{APIURL: srv.URL, APIModel: "m"}, testMessages)
 	if err == nil || !strings.Contains(err.Error(), "500") {
 		t.Fatalf("expected HTTP error, got %v", err)
 	}
@@ -55,7 +56,7 @@ func TestCompleteMalformedJSON(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := completions.Complete(setup.Options{APIURL: srv.URL, APIModel: "m"}, testMessages)
+	_, err := completions.Complete(context.Background(), setup.Options{APIURL: srv.URL, APIModel: "m"}, testMessages)
 	if err == nil || !strings.Contains(err.Error(), "cannot parse response") {
 		t.Fatalf("expected parse error, got %v", err)
 	}
@@ -67,14 +68,24 @@ func TestCompleteNoChoices(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	_, err := completions.Complete(setup.Options{APIURL: srv.URL, APIModel: "m"}, testMessages)
+	_, err := completions.Complete(context.Background(), setup.Options{APIURL: srv.URL, APIModel: "m"}, testMessages)
 	if err == nil || !strings.Contains(err.Error(), "no choices") {
 		t.Fatalf("expected no-choices error, got %v", err)
 	}
 }
 
 func TestCompleteUnreachable(t *testing.T) {
-	_, err := completions.Complete(setup.Options{APIURL: "http://127.0.0.1:1", APIModel: "m"}, testMessages)
+	_, err := completions.Complete(context.Background(), setup.Options{APIURL: "http://127.0.0.1:1", APIModel: "m"}, testMessages)
+	if err == nil || !strings.Contains(err.Error(), "cannot reach") {
+		t.Fatalf("expected reach error, got %v", err)
+	}
+}
+
+func TestCompleteCanceled(t *testing.T) {
+	// A canceled context aborts the request cleanly.
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := completions.Complete(ctx, clientOpts("http://127.0.0.1:1"), testMessages)
 	if err == nil || !strings.Contains(err.Error(), "cannot reach") {
 		t.Fatalf("expected reach error, got %v", err)
 	}

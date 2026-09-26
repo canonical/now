@@ -22,13 +22,16 @@ type Options struct {
 // Load reads the configuration from $HOME/.now. Missing keys get their
 // defaults; api-url is required.
 func Load() (*Options, error) {
-	opts := &Options{APIModel: "default", APIType: "completions-v1"}
-
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("cannot discover home directory: %w", err)
 	}
-	path := filepath.Join(home, ".now")
+	return LoadFrom(filepath.Join(home, ".now"))
+}
+
+// LoadFrom reads the configuration from the given file path.
+func LoadFrom(path string) (*Options, error) {
+	opts := &Options{APIModel: "default", APIType: "completions-v1"}
 
 	f, err := os.Open(path)
 	if err != nil {
