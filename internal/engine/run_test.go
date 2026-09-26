@@ -8,16 +8,28 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/niemeyer/now/internal/busybox"
 	"github.com/niemeyer/now/internal/engine"
 	"github.com/niemeyer/now/internal/prompt"
 )
 
+// mustBusybox probes busybox for the test.
+func mustBusybox(t *testing.T) busybox.Options {
+	t.Helper()
+	opts, err := busybox.Probe(busybox.Options{})
+	if err != nil {
+		t.Fatalf("cannot probe busybox: %v", err)
+	}
+	return opts
+}
+
 func TestRunOutputsAndArgs(t *testing.T) {
 	var out, errOut bytes.Buffer
 	err := engine.Run(context.Background(), `for a in "$@"; do echo "arg: $a"; done`, engine.RunOptions{
-		Args:   []string{"one", "two words"},
-		Stdout: &out,
-		Stderr: &errOut,
+		Args:    []string{"one", "two words"},
+		Busybox: mustBusybox(t),
+		Stdout:  &out,
+		Stderr:  &errOut,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -28,6 +40,7 @@ func TestRunOutputsAndArgs(t *testing.T) {
 func TestRunScriptFailure(t *testing.T) {
 	var out bytes.Buffer
 	err := engine.Run(context.Background(), "echo before\necho oops >&2\nexit 3", engine.RunOptions{
+		Busybox: mustBusybox(t),
 		Stdout: &out,
 		Stderr: &out,
 	})
@@ -41,7 +54,7 @@ func TestRunScriptFailure(t *testing.T) {
 
 func TestRunStderr(t *testing.T) {
 	var out, errOut bytes.Buffer
-	err := engine.Run(context.Background(), "echo err >&2", engine.RunOptions{Stdout: &out, Stderr: &errOut})
+	err := engine.Run(context.Background(), "echo err >&2", engine.RunOptions{Busybox: mustBusybox(t), Stdout: &out, Stderr: &errOut})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -53,6 +66,7 @@ func TestRunTrace(t *testing.T) {
 	// -x prints each command to stderr as it executes.
 	var out, errOut bytes.Buffer
 	err := engine.Run(context.Background(), "echo hi", engine.RunOptions{
+		Busybox: mustBusybox(t),
 		Stdout: &out,
 		Stderr: &errOut,
 		Trace:  true,
@@ -66,8 +80,8 @@ func TestRunTrace(t *testing.T) {
 	}
 }
 
-func TestRunAliasesBuiltinShadowingCommand(t *testing.T) {
-	// A -w command that shadows a busybox builtin (echo) is aliased to
+func TestRunAliasesAppletShadowingCommand(t *testing.T) {
+	// A -w command that shadows a busybox applet (echo) is aliased to
 	// its absolute path, so the script runs the real command.
 	dir := t.TempDir()
 	path := filepath.Join(dir, "echo")
@@ -78,8 +92,9 @@ func TestRunAliasesBuiltinShadowingCommand(t *testing.T) {
 
 	var out bytes.Buffer
 	err := engine.Run(context.Background(), "echo hello", engine.RunOptions{
-		Stdout: &out,
-		Stderr: &out,
+		Busybox: mustBusybox(t),
+		Stdout:   &out,
+		Stderr:   &out,
 		Commands: []prompt.Command{
 			{Name: "echo", Path: path, Help: ""},
 		},
@@ -90,9 +105,9 @@ func TestRunAliasesBuiltinShadowingCommand(t *testing.T) {
 	assertEqual(t, "stdout", out.String(), "REAL-ECHO hello\n")
 }
 
-func TestRunBuiltinWinsWithoutAlias(t *testing.T) {
+func TestRunAppletWinsWithoutAlias(t *testing.T) {
 	// The opposite of the alias test: without the alias, busybox runs
-	// its own builtin even when $PATH has another command by the same
+	// its own applet even when $PATH has another command by the same
 	// name. This is the behavior the alias prelude exists to override.
 	// The fake echo touches a marker file; if the marker appears, the
 	// PATH command wrongly won.
@@ -106,32 +121,43 @@ func TestRunBuiltinWinsWithoutAlias(t *testing.T) {
 
 	var out bytes.Buffer
 	err := engine.Run(context.Background(), "echo hello", engine.RunOptions{
-		Stdout: &out,
-		Stderr: &out,
+		Busybox: mustBusybox(t),
+		Stdout:  &out,
+		Stderr:  &out,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if _, err := os.Stat(marker); err == nil {
-		t.Errorf("PATH command won over the busybox builtin")
+		t.Errorf("PATH command won over the busybox applet")
 	}
 }
 
-func TestRunNoAliasWithoutShadow(t *testing.T) {
-	// A -w command that does not shadow a builtin gets no alias: the
-	// script text passes through unchanged.
+func TestRunAliasesAllCommands(t *testing.T) {
+	// Every -c command is aliased to its absolute path — not just the
+	// applet-shadowing ones — so the script runs exactly the binary
+	// resolved at parse time, and works inside the sandbox where $PATH
+	// directories are not bound.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "jq")
+	script := "#!/bin/sh\necho REAL-JQ \"$@\"\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("cannot write command: %v", err)
+	}
+
 	var out bytes.Buffer
-	err := engine.Run(context.Background(), "echo marker", engine.RunOptions{
-		Stdout: &out,
+	err := engine.Run(context.Background(), "jq filter", engine.RunOptions{
+		Busybox: mustBusybox(t),
+		Stdout:  &out,
 		Stderr: &out,
 		Commands: []prompt.Command{
-			{Name: "jq", Path: "/usr/bin/jq", Help: ""},
+			{Name: "jq", Path: path, Help: ""},
 		},
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertEqual(t, "stdout", out.String(), "marker\n")
+	assertEqual(t, "stdout", out.String(), "REAL-JQ filter\n")
 }
 
 func TestRunCanceled(t *testing.T) {
@@ -139,7 +165,7 @@ func TestRunCanceled(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	var out bytes.Buffer
-	err := engine.Run(ctx, "sleep 5", engine.RunOptions{Stdout: &out, Stderr: &out})
+	err := engine.Run(ctx, "sleep 5", engine.RunOptions{Busybox: mustBusybox(t), Stdout: &out, Stderr: &out})
 	if err == nil || !strings.Contains(err.Error(), "cannot run script") {
 		t.Fatalf("expected run error, got %v", err)
 	}

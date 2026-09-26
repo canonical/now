@@ -9,8 +9,10 @@ import (
 	"os/signal"
 
 	"github.com/niemeyer/now/internal/api/completions"
+	"github.com/niemeyer/now/internal/busybox"
 	"github.com/niemeyer/now/internal/engine"
 	"github.com/niemeyer/now/internal/prompt"
+	"github.com/niemeyer/now/internal/sandbox"
 	"github.com/niemeyer/now/internal/setup"
 )
 
@@ -55,10 +57,40 @@ func Run(ctx context.Context, opts RunOptions) error {
 		return err
 	}
 
+	// Resolve busybox before anything else: the prompt needs its
+	// applets, the sandbox probe needs its path, and a missing busybox
+	// must fail before the model is called.
+	busyOpts, err := busybox.Probe(busybox.Options{})
+	if err != nil {
+		return err
+	}
+
+	// Probe the confinement before generating the script: failing to
+	// confine must not waste a model call and a human review.
+	grants := sandbox.Options{
+		Readable: parsed.Readable,
+		Writable: parsed.Writable,
+		Network:  parsed.Network,
+	}
+	sandboxOn := parsed.Sandbox || len(parsed.Readable) > 0 || len(parsed.Writable) > 0
+	if sandboxOn {
+		// The allowed commands are granted readable so their binaries
+		// are bound inside the sandbox.
+		for _, c := range parsed.Commands {
+			grants.Readable = append(grants.Readable, c.Path)
+		}
+		bwrap, err := sandbox.Probe(grants, busyOpts.Path)
+		if err != nil {
+			return err
+		}
+		grants.Bwrap = bwrap
+	}
+
 	script, err := engine.Generate(ctx, engine.GenerateOptions{
 		Request:  parsed.Request,
 		Args:     parsed.Args,
 		Commands: parsed.Commands,
+		Busybox:  busyOpts,
 		Complete: func(ctx context.Context, messages []prompt.Message) (string, error) {
 			return completions.Complete(ctx, *setupOpts, messages)
 		},
@@ -80,11 +112,18 @@ func Run(ctx context.Context, opts RunOptions) error {
 		return nil
 	}
 
+	// Grants: explicit -r/-w paths. Confinement turns the network off
+	// unless -n opts in. The grants were assembled and probed above,
+	// before generating the script.
+
 	return engine.Run(ctx, script, engine.RunOptions{
-		Args:     parsed.Args,
-		Stdout:   opts.Stdout,
-		Stderr:   opts.Stderr,
-		Trace:    parsed.Trace,
-		Commands: parsed.Commands,
+		Args:      parsed.Args,
+		Stdout:    opts.Stdout,
+		Stderr:    opts.Stderr,
+		Trace:     parsed.Trace,
+		Commands:  parsed.Commands,
+		Busybox:   busyOpts,
+		SandboxOn: sandboxOn,
+		Sandbox:   grants,
 	})
 }

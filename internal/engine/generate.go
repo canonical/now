@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/niemeyer/now/internal/busybox"
 	"github.com/niemeyer/now/internal/prompt"
 )
 
@@ -14,6 +15,9 @@ type GenerateOptions struct {
 	Request  string
 	Args     []string
 	Commands []prompt.Command
+	// Busybox is the resolved busybox that will run the script, used
+	// to tell the model which applets it has.
+	Busybox busybox.Options
 	// Complete dispatches the prompt messages to the model API chosen
 	// by the caller and returns its reply.
 	Complete func(ctx context.Context, messages []prompt.Message) (string, error)
@@ -26,6 +30,7 @@ func Generate(ctx context.Context, opts GenerateOptions) (string, error) {
 		Request:  opts.Request,
 		Args:     opts.Args,
 		Commands: opts.Commands,
+		Applets:  opts.Busybox.Applets,
 	})
 	reply, err := opts.Complete(ctx, messages)
 	if err != nil {

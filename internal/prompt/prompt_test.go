@@ -94,9 +94,9 @@ func TestBuildReferencesSection(t *testing.T) {
 }
 
 func TestBuildWithoutCommands(t *testing.T) {
-	// The allowed commands section always appears: busybox builtins are
-	// always available, even with no -w commands. No help sections then.
-	msgs := prompt.Build(prompt.BuildOptions{Request: "q"})
+	// The allowed commands section always appears, listing the busybox
+	// applets even with no -w commands. No help sections then.
+	msgs := prompt.Build(prompt.BuildOptions{Request: "q", Applets: []string{"ls"}})
 	if !strings.Contains(msgs[0].Content, "## ALLOWED COMMANDS\n") {
 		t.Errorf("missing allowed commands section: %q", msgs[0].Content)
 	}
@@ -127,12 +127,15 @@ func TestBuildCommandWithoutHelp(t *testing.T) {
 	}
 }
 
-func TestBuildIncludesBusyboxBuiltins(t *testing.T) {
-	msgs := prompt.Build(prompt.BuildOptions{Request: "q"})
+func TestBuildIncludesBusyboxApplets(t *testing.T) {
+	msgs := prompt.Build(prompt.BuildOptions{
+		Request: "q",
+		Applets: []string{"ls", "mv", "sed", "awk", "grep"},
+	})
 	sys := msgs[0].Content
 	for _, cmd := range []string{"ls", "mv", "sed", "awk", "grep"} {
 		if !strings.Contains(sys, cmd) {
-			t.Errorf("system prompt missing busybox builtin %q", cmd)
+			t.Errorf("system prompt missing busybox applet %q", cmd)
 		}
 	}
 }

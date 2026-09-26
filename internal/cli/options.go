@@ -5,6 +5,7 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -34,6 +35,21 @@ type Options struct {
 	// Trace prints each script command to stderr as it executes,
 	// like the shell's -x.
 	Trace bool
+
+	// Sandbox confines the script execution with bwrap even without
+	// other confining flags.
+	Sandbox bool
+
+	// Readable holds the paths the script may read, when confined.
+	Readable []string
+
+	// Writable holds the paths the script may read and write, when
+	// confined.
+	Writable []string
+
+	// Network keeps the network available when confined; confinement
+	// unshares it otherwise.
+	Network bool
 }
 
 // ParseError is returned for invalid command lines; its message is meant to
@@ -49,7 +65,7 @@ func parseErrf(format string, args ...any) error {
 // usage is shown when --help is used.
 const usage = `Usage:
 
-  now [-y] [-q] [-x] [-w cmd,...] "<request>" [<arg> ...]
+  now [-y] [-q] [-t] [-c cmd,...] [-s] [-r path] [-w path] [-n] "<request>" [<arg> ...]
 
   Arguments:
 
@@ -58,8 +74,12 @@ const usage = `Usage:
   -            Reads either the request or the arguments from stdin.
   -y           Auto-approve the generated script without asking.
   -q           Auto-approve and also hide the script before running it.
-  -x           Print each script command to stderr as it executes.
-  -w cmd,...   Comma-separated external command names allowed for the script.
+  -t           Print each script command to stderr as it executes.
+  -c cmd,...   Comma-separated external command names allowed for the script.
+  -s           Confine the script execution with bwrap.
+  -r path      When confined, grant the path readable (may repeat).
+  -w path      When confined, grant the path writable (may repeat).
+  -n           When confined, keep the network available.
 
 The now command generates a shell script to perform the requested
 operation, prints it for approval, and then executes it in busybox.
@@ -165,18 +185,49 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 			opts.Yes = true
 		case arg == "-q":
 			opts.Quiet = true
-		case arg == "-x":
+		case arg == "-t":
 			opts.Trace = true
+		case arg == "-s":
+			opts.Sandbox = true
+		// -r and -w stay plain and separate: -w implies read too, and we
+		// do not want to take over -x, as it may come some day with an
+		// execution semantics that bwrap alone cannot express.
+		case arg == "-r":
+			if i+1 >= len(argv) {
+				return nil, parseErrf("-r requires a path")
+			}
+			i++
+			if err := addReadable(opts, argv[i]); err != nil {
+				return nil, err
+			}
+		case strings.HasPrefix(arg, "-r="):
+			if err := addReadable(opts, strings.TrimPrefix(arg, "-r=")); err != nil {
+				return nil, err
+			}
 		case arg == "-w":
 			if i+1 >= len(argv) {
-				return nil, parseErrf("-w requires a comma-separated list of commands")
+				return nil, parseErrf("-w requires a path")
+			}
+			i++
+			if err := addWritable(opts, argv[i]); err != nil {
+				return nil, err
+			}
+		case strings.HasPrefix(arg, "-w="):
+			if err := addWritable(opts, strings.TrimPrefix(arg, "-w=")); err != nil {
+				return nil, err
+			}
+		case arg == "-n":
+			opts.Network = true
+		case arg == "-c":
+			if i+1 >= len(argv) {
+				return nil, parseErrf("-c requires a comma-separated list of commands")
 			}
 			i++
 			if err := addCommands(opts, argv[i]); err != nil {
 				return nil, err
 			}
-		case strings.HasPrefix(arg, "-w="):
-			if err := addCommands(opts, strings.TrimPrefix(arg, "-w=")); err != nil {
+		case strings.HasPrefix(arg, "-c="):
+			if err := addCommands(opts, strings.TrimPrefix(arg, "-c=")); err != nil {
 				return nil, err
 			}
 		case strings.HasPrefix(arg, "-") && arg != "-":
@@ -187,6 +238,26 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 		i++
 	}
 	return nil, nil
+}
+
+// addReadable records path as readable, verifying it exists so a typo
+// fails before any API call.
+func addReadable(opts *Options, path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return parseErrf("cannot read %s: no such file or directory", path)
+	}
+	opts.Readable = append(opts.Readable, path)
+	return nil
+}
+
+// addWritable records path as writable, verifying it exists so a typo
+// fails before any API call.
+func addWritable(opts *Options, path string) error {
+	if _, err := os.Stat(path); err != nil {
+		return parseErrf("cannot write %s: no such file or directory", path)
+	}
+	opts.Writable = append(opts.Writable, path)
+	return nil
 }
 
 func addCommands(opts *Options, list string) error {

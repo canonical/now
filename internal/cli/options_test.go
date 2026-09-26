@@ -101,7 +101,7 @@ func TestParseCommandWithoutHelp(t *testing.T) {
 	// help but a resolved path.
 	withNoHelpCommands(t, "nohelputil")
 
-	opts := mustParse(t, []string{"-w", "nohelputil", "q", "a.txt"})
+	opts := mustParse(t, []string{"-c", "nohelputil", "q", "a.txt"})
 	assertEqual(t, "len(Commands)", len(opts.Commands), 1)
 	assertEqual(t, "Name", opts.Commands[0].Name, "nohelputil")
 	assertEqual(t, "Help", opts.Commands[0].Help, "")
@@ -113,20 +113,20 @@ func TestParseCommandWithoutHelp(t *testing.T) {
 func TestParseCommandsFlag(t *testing.T) {
 	withFakeCommands(t, "fakeone", "faketwo")
 
-	opts := mustParse(t, []string{"-w", "fakeone,faketwo", "q", "a.txt"})
+	opts := mustParse(t, []string{"-c", "fakeone,faketwo", "q", "a.txt"})
 	dir := filepath.Dir(opts.Commands[0].Path)
 	assertEqual(t, "Commands", opts.Commands, []prompt.Command{
 		{Name: "fakeone", Path: filepath.Join(dir, "fakeone"), Help: "usage: fakeone [options]\n"},
 		{Name: "faketwo", Path: filepath.Join(dir, "faketwo"), Help: "usage: faketwo [options]\n"},
 	})
 
-	opts = mustParse(t, []string{"-w=fakeone , faketwo", "q", "a.txt"})
+	opts = mustParse(t, []string{"-c=fakeone , faketwo", "q", "a.txt"})
 	assertEqual(t, "len(Commands)", len(opts.Commands), 2)
 }
 
 func TestParseUnknownCommand(t *testing.T) {
 	// A -w command that is not in $PATH is a hard error.
-	_, err := cli.Parse([]string{"-w", "nosuchcmd", "q", "a.txt"}, strings.NewReader(""))
+	_, err := cli.Parse([]string{"-c", "nosuchcmd", "q", "a.txt"}, strings.NewReader(""))
 	if err == nil || !strings.Contains(err.Error(), `cannot find command "nosuchcmd"`) {
 		t.Fatalf("expected missing command error, got %v", err)
 	}
@@ -139,8 +139,81 @@ func TestParseRequestOnly(t *testing.T) {
 	assertEqual(t, "Args", opts.Args, []string(nil))
 }
 
+func TestParseSandboxFlag(t *testing.T) {
+	opts := mustParse(t, []string{"-s", "q"})
+	if !opts.Sandbox {
+		t.Errorf("-s: Sandbox = false, want true")
+	}
+	assertEqual(t, "Readable", opts.Readable, []string(nil))
+
+	opts = mustParse(t, []string{"q"})
+	if opts.Sandbox {
+		t.Errorf("without -s: Sandbox = true, want false")
+	}
+}
+
+func TestParseReadableFlag(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := mustParse(t, []string{"-r", dir, "q"})
+	assertEqual(t, "Readable", opts.Readable, []string{dir})
+
+	// Repeated flags accumulate.
+	opts = mustParse(t, []string{"-r", dir, "-r=" + dir, "q"})
+	assertEqual(t, "Readable", opts.Readable, []string{dir, dir})
+
+	// -r after the request is a plain argument.
+	opts = mustParse(t, []string{"q", "-r", dir})
+	assertEqual(t, "Readable", opts.Readable, []string(nil))
+	assertEqual(t, "Args", opts.Args, []string{"-r", dir})
+}
+
+func TestParseReadableMissingPath(t *testing.T) {
+	// A grant on a missing path fails before any API call.
+	_, err := cli.Parse([]string{"-r", "/nosuch/path", "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "cannot read /nosuch/path") {
+		t.Fatalf("expected missing path error, got %v", err)
+	}
+}
+
+func TestParseWritableFlag(t *testing.T) {
+	dir := t.TempDir()
+
+	opts := mustParse(t, []string{"-w", dir, "q"})
+	assertEqual(t, "Writable", opts.Writable, []string{dir})
+	assertEqual(t, "Readable", opts.Readable, []string(nil))
+
+	// Repeated flags accumulate, = form works.
+	opts = mustParse(t, []string{"-w", dir, "-w=" + dir, "q"})
+	assertEqual(t, "Writable", opts.Writable, []string{dir, dir})
+
+	// -w after the request is a plain argument.
+	opts = mustParse(t, []string{"q", "-w", dir})
+	assertEqual(t, "Writable", opts.Writable, []string(nil))
+	assertEqual(t, "Args", opts.Args, []string{"-w", dir})
+}
+
+func TestParseWritableMissingPath(t *testing.T) {
+	_, err := cli.Parse([]string{"-w", "/nosuch/path", "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "cannot write /nosuch/path") {
+		t.Fatalf("expected missing path error, got %v", err)
+	}
+}
+
+func TestParseNetworkFlag(t *testing.T) {
+	opts := mustParse(t, []string{"-n", "q"})
+	if !opts.Network {
+		t.Errorf("-n: Network = false, want true")
+	}
+
+	opts = mustParse(t, []string{"q"})
+	if opts.Network {
+		t.Errorf("without -n: Network = true, want false")
+	}
+}
+
 func TestParseTraceFlag(t *testing.T) {
-	opts := mustParse(t, []string{"-x", "q", "a.txt"})
+	opts := mustParse(t, []string{"-t", "q", "a.txt"})
 	if !opts.Trace {
 		t.Errorf("-x: Trace = false, want true")
 	}
@@ -151,11 +224,11 @@ func TestParseTraceFlag(t *testing.T) {
 	}
 
 	// -x after the request is a path, not a flag.
-	opts = mustParse(t, []string{"q", "-x"})
+	opts = mustParse(t, []string{"q", "-t"})
 	if opts.Trace {
 		t.Errorf("-x after request: Trace = true, want false")
 	}
-	assertEqual(t, "Args", opts.Args, []string{"-x"})
+	assertEqual(t, "Args", opts.Args, []string{"-t"})
 }
 
 func TestParseYesFlag(t *testing.T) {
@@ -185,8 +258,8 @@ func TestParseErrors(t *testing.T) {
 		{"no args", nil},
 		{"empty request", []string{"  ", "a.txt"}},
 		{"unknown flag", []string{"-z", "q", "a.txt"}},
-		{"-w missing value", []string{"-w"}},
-		{"-w empty name", []string{"-w", "curl,,jq", "q", "a.txt"}},
+		{"-c missing value", []string{"-c"}},
+		{"-c empty name", []string{"-c", "curl,,jq", "q", "a.txt"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -201,11 +274,11 @@ func TestParseErrors(t *testing.T) {
 
 func TestParseFlagAfterRequestIsPath(t *testing.T) {
 	// -w after the request is just a path, not a flag.
-	opts, err := cli.Parse([]string{"q", "-w", "a.txt"}, strings.NewReader(""))
+	opts, err := cli.Parse([]string{"q", "-c", "a.txt"}, strings.NewReader(""))
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertEqual(t, "Args", opts.Args, []string{"-w", "a.txt"})
+	assertEqual(t, "Args", opts.Args, []string{"-c", "a.txt"})
 }
 
 func TestParseHelp(t *testing.T) {
