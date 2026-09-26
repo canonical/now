@@ -59,22 +59,71 @@ func TestBuildWithCommands(t *testing.T) {
 	msgs := prompt.Build(prompt.BuildOptions{
 		Request: "fetch it",
 		Args:    []string{"http://x/data.txt"},
-		With:    []string{"curl", "jq"},
+		Commands: []prompt.Command{
+			{Name: "curl", Help: "curl usage:\n  curl [options] URL"},
+			{Name: "jq", Help: "jq usage:\n  jq filter"},
+		},
 	})
 	if !strings.Contains(msgs[0].Content, "## ALLOWED COMMANDS\ncurl jq\n") {
 		t.Errorf("missing allowed commands section: %q", msgs[0].Content)
 	}
+	if !strings.Contains(msgs[0].Content, "## REFERENCES\n\n### curl --help\ncurl usage:\n  curl [options] URL") {
+		t.Errorf("missing curl help: %q", msgs[0].Content)
+	}
+	if !strings.Contains(msgs[0].Content, "### jq --help\njq usage:\n  jq filter") {
+		t.Errorf("missing jq help: %q", msgs[0].Content)
+	}
+}
+
+func TestBuildReferencesSection(t *testing.T) {
+	// With two commands, there is a single REFERENCES section holding
+	// one subsection per command, in order.
+	msgs := prompt.Build(prompt.BuildOptions{
+		Request: "fetch it",
+		Commands: []prompt.Command{
+			{Name: "curl", Help: "curl usage:\n  curl [options] URL"},
+			{Name: "jq", Help: "jq usage:\n  jq filter"},
+		},
+	})
+	start := strings.Index(msgs[0].Content, "\n\n## REFERENCES\n\n### curl --help")
+	if start < 0 {
+		t.Fatalf("REFERENCES section not found: %q", msgs[0].Content)
+	}
+	assertEqual(t, "references", msgs[0].Content[start:], "\n\n## REFERENCES\n\n### curl --help\ncurl usage:\n  curl [options] URL"+
+		"\n\n### jq --help\njq usage:\n  jq filter")
 }
 
 func TestBuildWithoutCommands(t *testing.T) {
 	// The allowed commands section always appears: busybox builtins are
-	// always available, even with no -w commands.
+	// always available, even with no -w commands. No help sections then.
 	msgs := prompt.Build(prompt.BuildOptions{Request: "q"})
 	if !strings.Contains(msgs[0].Content, "## ALLOWED COMMANDS\n") {
 		t.Errorf("missing allowed commands section: %q", msgs[0].Content)
 	}
-	if strings.Contains(msgs[0].Content, "curl") {
-		t.Errorf("unexpected -w command without -w: %q", msgs[0].Content)
+	if strings.Contains(msgs[0].Content, "## REFERENCES") {
+		t.Errorf("unexpected help section: %q", msgs[0].Content)
+	}
+}
+
+func TestBuildCommandWithoutHelp(t *testing.T) {
+	// A command with no --help is still allowed, but gets no reference.
+	msgs := prompt.Build(prompt.BuildOptions{
+		Request: "do it",
+		Commands: []prompt.Command{
+			{Name: "curl", Help: "curl usage:\n  curl [options] URL"},
+			{Name: "nohelputil", Help: ""},
+			{Name: "jq", Help: "jq usage:\n  jq filter"},
+		},
+	})
+	if !strings.Contains(msgs[0].Content, "## ALLOWED COMMANDS\ncurl nohelputil jq\n") {
+		t.Errorf("missing allowed commands entry: %q", msgs[0].Content)
+	}
+	if strings.Contains(msgs[0].Content, "nohelputil --help") {
+		t.Errorf("unexpected reference for help-less command: %q", msgs[0].Content)
+	}
+	if !strings.Contains(msgs[0].Content, "### curl --help") ||
+		!strings.Contains(msgs[0].Content, "### jq --help") {
+		t.Errorf("missing other references: %q", msgs[0].Content)
 	}
 }
 

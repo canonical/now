@@ -5,7 +5,10 @@ import (
 	"bufio"
 	"fmt"
 	"io"
+	"os/exec"
 	"strings"
+
+	"github.com/niemeyer/now/internal/prompt"
 )
 
 // Options is the parsed form of the command line.
@@ -17,8 +20,9 @@ type Options struct {
 	// Args holds the arguments provided after the request, in order.
 	Args []string
 
-	// With are external command names from $PATH allowed in the script.
-	With []string
+	// Commands are external commands from $PATH allowed in the
+	// script, with their --help output.
+	Commands []prompt.Command
 
 	// Yes auto-approves the generated script.
 	Yes bool
@@ -168,11 +172,11 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 				return nil, parseErrf("-w requires a comma-separated list of commands")
 			}
 			i++
-			if err := addWith(opts, argv[i]); err != nil {
+			if err := addCommands(opts, argv[i]); err != nil {
 				return nil, err
 			}
 		case strings.HasPrefix(arg, "-w="):
-			if err := addWith(opts, strings.TrimPrefix(arg, "-w=")); err != nil {
+			if err := addCommands(opts, strings.TrimPrefix(arg, "-w=")); err != nil {
 				return nil, err
 			}
 		case strings.HasPrefix(arg, "-") && arg != "-":
@@ -185,15 +189,34 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 	return nil, nil
 }
 
-func addWith(opts *Options, list string) error {
+func addCommands(opts *Options, list string) error {
 	for _, name := range strings.Split(list, ",") {
 		name = strings.TrimSpace(name)
 		if name == "" {
 			return parseErrf("-w: empty command name")
 		}
-		opts.With = append(opts.With, name)
+		cmd, err := findCommand(name)
+		if err != nil {
+			return err
+		}
+		opts.Commands = append(opts.Commands, cmd)
 	}
 	return nil
+}
+
+// findCommand resolves name in $PATH and captures its --help output. A
+// command that does not support --help is still accepted; it just carries
+// no help for the prompt.
+func findCommand(name string) (prompt.Command, error) {
+	path, err := exec.LookPath(name)
+	if err != nil {
+		return prompt.Command{}, parseErrf("cannot find command %q in $PATH", name)
+	}
+	out, err := exec.Command(path, "--help").Output()
+	if err != nil {
+		return prompt.Command{Name: name, Path: path}, nil
+	}
+	return prompt.Command{Name: name, Path: path, Help: string(out)}, nil
 }
 
 // HelpRequested is returned when -h or --help is given.

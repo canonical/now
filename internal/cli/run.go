@@ -56,9 +56,9 @@ func Run(ctx context.Context, opts RunOptions) error {
 	}
 
 	script, err := engine.Generate(ctx, engine.GenerateOptions{
-		Request: parsed.Request,
-		Args:    parsed.Args,
-		With:    parsed.With,
+		Request:  parsed.Request,
+		Args:     parsed.Args,
+		Commands: parsed.Commands,
 		Complete: func(ctx context.Context, messages []prompt.Message) (string, error) {
 			return completions.Complete(ctx, *setupOpts, messages)
 		},
@@ -81,9 +81,10 @@ func Run(ctx context.Context, opts RunOptions) error {
 	}
 
 	return engine.Run(ctx, script, engine.RunOptions{
-		Args:   parsed.Args,
-		Stdout: opts.Stdout,
-		Stderr: opts.Stderr,
-		Trace:  parsed.Trace,
+		Args:     parsed.Args,
+		Stdout:   opts.Stdout,
+		Stderr:   opts.Stderr,
+		Trace:    parsed.Trace,
+		Commands: parsed.Commands,
 	})
 }

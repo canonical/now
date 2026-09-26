@@ -11,9 +11,9 @@ import (
 
 // GenerateOptions carries the inputs for script generation.
 type GenerateOptions struct {
-	Request string
-	Args    []string
-	With    []string
+	Request  string
+	Args     []string
+	Commands []prompt.Command
 	// Complete dispatches the prompt messages to the model API chosen
 	// by the caller and returns its reply.
 	Complete func(ctx context.Context, messages []prompt.Message) (string, error)
@@ -23,9 +23,9 @@ type GenerateOptions struct {
 // produced by the model.
 func Generate(ctx context.Context, opts GenerateOptions) (string, error) {
 	messages := prompt.Build(prompt.BuildOptions{
-		Request: opts.Request,
-		Args:    opts.Args,
-		With:    opts.With,
+		Request:  opts.Request,
+		Args:     opts.Args,
+		Commands: opts.Commands,
 	})
 	reply, err := opts.Complete(ctx, messages)
 	if err != nil {

@@ -12,6 +12,16 @@ type Message struct {
 	Content string `json:"content"`
 }
 
+// Command is an external command allowed in the script.
+type Command struct {
+	// Name is the command name as given to -w.
+	Name string
+	// Path is the resolved absolute path of the command.
+	Path string
+	// Help is the output of the command's --help, verbatim.
+	Help string
+}
+
 // BuildOptions carries everything the prompt needs.
 type BuildOptions struct {
 	// Request is the natural language request.
@@ -20,8 +30,8 @@ type BuildOptions struct {
 	// Args are the arguments made available to the script via "$@".
 	Args []string
 
-	// With are external command names allowed in the script.
-	With []string
+	// Commands are external commands allowed in the script.
+	Commands []Command
 }
 
 // systemPrompt is the template for the system message. The fence constant
@@ -61,13 +71,41 @@ traceroute traceroute6 true truncate ts tty tunctl ubirename udhcpc udhcpc6 udhc
 uuencode vconfig vi w watch watchdog wc wget which who whoami xargs xxd xz xzcat yes zcat zcmp zdiff zegrep zfgrep zforce zgrep zless zmore znew
 `
 
+// IsBusyboxBuiltin reports whether name is a busybox builtin. Busybox
+// built with the standalone-shell preference runs its own builtins over
+// $PATH lookups, so commands shadowing a builtin need an alias to their
+// real path at execution time.
+func IsBusyboxBuiltin(name string) bool {
+	for _, word := range strings.Fields(busyboxBuiltins) {
+		if word == name {
+			return true
+		}
+	}
+	return false
+}
+
 // Build creates the system and user messages for the given options.
 func Build(opts BuildOptions) []Message {
 	var system strings.Builder
 	system.WriteString(systemPrompt)
 	system.WriteString("\n## ALLOWED COMMANDS\n")
-	system.WriteString(strings.Join(opts.With, " "))
+	names := make([]string, len(opts.Commands))
+	for i, c := range opts.Commands {
+		names[i] = c.Name
+	}
+	system.WriteString(strings.Join(names, " "))
 	system.WriteString(busyboxBuiltins)
+	references := false
+	for _, c := range opts.Commands {
+		if c.Help == "" {
+			continue // command has no --help to reference
+		}
+		if !references {
+			system.WriteString("\n\n## REFERENCES")
+			references = true
+		}
+		system.WriteString("\n\n### " + c.Name + " --help\n" + c.Help)
+	}
 
 	var user strings.Builder
 	user.WriteString("## REQUEST\n")

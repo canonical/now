@@ -2,11 +2,14 @@ package cli_test
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/niemeyer/now/internal/cli"
+	"github.com/niemeyer/now/internal/prompt"
 )
 
 // assertEqual fails the test when got and want are not deeply equal.
@@ -35,7 +38,7 @@ func TestParseBasic(t *testing.T) {
 	opts := mustParse(t, []string{"change the suffix", "hello-world.txt", "other.txt"})
 	assertEqual(t, "Request", opts.Request, "change the suffix")
 	assertEqual(t, "Args", opts.Args, []string{"hello-world.txt", "other.txt"})
-	assertEqual(t, "With", opts.With, []string(nil))
+	assertEqual(t, "Commands", opts.Commands, []prompt.Command(nil))
 }
 
 func TestParseStdin(t *testing.T) {
@@ -65,12 +68,68 @@ func TestParseStdinRequest(t *testing.T) {
 	}
 }
 
-func TestParseWithFlag(t *testing.T) {
-	opts := mustParse(t, []string{"-w", "curl,jq", "q", "a.txt"})
-	assertEqual(t, "With", opts.With, []string{"curl", "jq"})
+// withFakeCommands puts a temp dir with fake commands on $PATH for the
+// test. Each fake prints a fixed --help line.
+func withFakeCommands(t *testing.T, names ...string) {
+	t.Helper()
+	dir := t.TempDir()
+	for _, name := range names {
+		script := "#!/bin/sh\necho \"usage: " + name + " [options]\"\n"
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+			t.Fatalf("cannot write command: %v", err)
+		}
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+}
 
-	opts = mustParse(t, []string{"-w=curl , jq", "q", "a.txt"})
-	assertEqual(t, "With", opts.With, []string{"curl", "jq"})
+// withNoHelpCommands is like withFakeCommands, but the commands reject
+// --help with a non-zero exit and no output.
+func withNoHelpCommands(t *testing.T, names ...string) {
+	t.Helper()
+	dir := t.TempDir()
+	for _, name := range names {
+		script := "#!/bin/sh\nexit 1\n"
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(script), 0o755); err != nil {
+			t.Fatalf("cannot write command: %v", err)
+		}
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+}
+
+func TestParseCommandWithoutHelp(t *testing.T) {
+	// A command that does not support --help is accepted, with empty
+	// help but a resolved path.
+	withNoHelpCommands(t, "nohelputil")
+
+	opts := mustParse(t, []string{"-w", "nohelputil", "q", "a.txt"})
+	assertEqual(t, "len(Commands)", len(opts.Commands), 1)
+	assertEqual(t, "Name", opts.Commands[0].Name, "nohelputil")
+	assertEqual(t, "Help", opts.Commands[0].Help, "")
+	if !filepath.IsAbs(opts.Commands[0].Path) {
+		t.Errorf("Path = %q, want absolute", opts.Commands[0].Path)
+	}
+}
+
+func TestParseCommandsFlag(t *testing.T) {
+	withFakeCommands(t, "fakeone", "faketwo")
+
+	opts := mustParse(t, []string{"-w", "fakeone,faketwo", "q", "a.txt"})
+	dir := filepath.Dir(opts.Commands[0].Path)
+	assertEqual(t, "Commands", opts.Commands, []prompt.Command{
+		{Name: "fakeone", Path: filepath.Join(dir, "fakeone"), Help: "usage: fakeone [options]\n"},
+		{Name: "faketwo", Path: filepath.Join(dir, "faketwo"), Help: "usage: faketwo [options]\n"},
+	})
+
+	opts = mustParse(t, []string{"-w=fakeone , faketwo", "q", "a.txt"})
+	assertEqual(t, "len(Commands)", len(opts.Commands), 2)
+}
+
+func TestParseUnknownCommand(t *testing.T) {
+	// A -w command that is not in $PATH is a hard error.
+	_, err := cli.Parse([]string{"-w", "nosuchcmd", "q", "a.txt"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), `cannot find command "nosuchcmd"`) {
+		t.Fatalf("expected missing command error, got %v", err)
+	}
 }
 
 func TestParseRequestOnly(t *testing.T) {
