@@ -55,6 +55,10 @@ type Options struct {
 	// Network keeps the network available when confined; confinement
 	// unshares it otherwise.
 	Network bool
+
+	// Buffered captures the script's output and shows it only when the
+	// script fails.
+	Buffered bool
 }
 
 // ParseError is returned for invalid command lines; its message is meant to
@@ -101,11 +105,14 @@ Options:
   -y              Auto-approve the generated script without asking.
   -q              Auto-approve and also hide the script before running it.
   -t              Trace each script command to stderr as it executes.
+  -b              Buffer script output and only show it on failure.
   -c cmd,...      External command names from $PATH for the script to use.
   -s              Enforce sandbox mode even without -r -w -n.
   -r path -r ...  Enforce sandbox mode and allow read-only access to path.
   -w path -w ...  Enforce sandbox mode and allow read-write access to path.
   -n              Enforce sandbox mode and allow network usage.
+
+Boolean flags may be bundled together.
 `
 
 // Parse parses the argument list (without the program name), reading stdin
@@ -234,6 +241,8 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 					opts.Quiet = true
 				case 't':
 					opts.Trace = true
+				case 'b':
+					opts.Buffered = true
 				case 's':
 					opts.Sandbox = true
 				case 'n':

@@ -29,8 +29,8 @@ type ApprovalOptions struct {
 	TTY io.Reader
 }
 
-// Approve shows the script on stderr and asks for confirmation on the
-// controlling terminal.
+// Approve shows the script on the given writer and asks for
+// confirmation on the controlling terminal.
 //
 // With Yes or Quiet, the script is approved without asking; Quiet
 // additionally hides it. Otherwise the user is asked on the controlling
@@ -38,12 +38,24 @@ type ApprovalOptions struct {
 // consuming piped stdin does not interfere — to press ENTER to approve;
 // any other input, EOF, or an interrupt cancels. Without a controlling
 // terminal there is no way to ask, so approval fails as an error.
+//
+// The [ ENTER | CTRL-C ] line always goes to the writer, even when the
+// script itself does not: it separates the reviewed script from the
+// script's own output that follows.
 func Approve(ctx context.Context, opts ApprovalOptions) (bool, error) {
 	if !opts.Quiet {
 		fmt.Fprintln(opts.Stderr, opts.Script)
 	}
 
+	const prompt = "[ ENTER | CTRL-C ]\n"
 	if opts.Yes || opts.Quiet {
+		if !opts.Quiet {
+			// The separator and the blank line match the interactive
+			// path, where the user's ENTER echoes a newline after the
+			// prompt.
+			fmt.Fprint(opts.Stderr, prompt)
+			fmt.Fprint(opts.Stderr, "\n")
+		}
 		return true, nil
 	}
 
@@ -57,7 +69,7 @@ func Approve(ctx context.Context, opts ApprovalOptions) (bool, error) {
 		tty = f
 	}
 
-	fmt.Fprintln(opts.Stderr, "[ ENTER | CTRL-C ]")
+	fmt.Fprint(opts.Stderr, prompt)
 
 	type read struct {
 		line string

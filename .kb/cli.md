@@ -109,6 +109,32 @@ Order matters and each step's position is a decision:
 - `Options` is intentionally minimal; parser bookkeeping must not
   leak into it (stdin is handled inline during parsing).
 
+## Buffered mode (-b)
+
+`-b` captures output and shows it only when the script fails, so a
+successful run stays quiet. The buffer is a single internal
+`bytes.Buffer` serving as both the script's stdout and stderr.
+
+The approval output follows the same destination as the script
+output — `cli.Run` computes the writers (buffer or real) *before*
+calling `Approve`, so the review and the execution share one stream:
+
+- **`-b` alone**: script shown on real stderr, approval read from the
+  tty, then execution output buffered.
+- **`-by`**: the script review and the `[ ENTER | CTRL-C ]`
+  separator go into the buffer too. A successful run produces
+  nothing at all; on failure the whole buffer flushes to stderr.
+- **`-bq`**: Quiet suppresses the script and the separator; nothing
+  is produced anywhere, and the buffer stays empty on success.
+- **`-y` (and `-by`)**: the `[ ENTER | CTRL-C ]` line always prints
+  to the selected output even though no question is asked — the
+  usual separation between the printed script and the output of the
+  script. With `-b` it lands in the buffer; with plain `-y` on
+  stderr. Quiet is the only mode that suppresses it.
+
+`-b` composes with `-t`: trace output also goes to the buffer and
+only appears on failure.
+
 ## Approval (Approve)
 
 - `-q` hides the script entirely; otherwise the script prints on
