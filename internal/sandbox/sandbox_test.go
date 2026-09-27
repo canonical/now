@@ -217,6 +217,104 @@ func TestWrapUngrantedPathInaccessible(t *testing.T) {
 	}
 }
 
+func TestWrapCwdUngrantedIsReadOnly(t *testing.T) {
+	// The working directory always exists inside the sandbox: when it
+	// is not granted, an empty read-only directory is bound in its
+	// place. Scripts start where the user ran now and absolute paths
+	// look natural, but writing there fails loudly instead of
+	// silently succeeding in a discarded tmpfs.
+	requireBwrap(t)
+	t.Chdir(t.TempDir())
+	cwd, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("cannot get cwd: %v", err)
+	}
+
+	out, err := runIn(t, sandbox.Options{Cwd: cwd}, "pwd; touch fresh 2>&1; ls")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasPrefix(out, cwd+"\n") {
+		t.Errorf("unexpected output: %q", out)
+	}
+	if !strings.Contains(out, "Read-only file system") {
+		t.Errorf("expected EROFS in output, got %q", out)
+	}
+	if strings.Contains(out, "fresh\n") {
+		t.Errorf("write to ungranted cwd appeared to succeed: %q", out)
+	}
+}
+
+func TestWrapCwdGrantedKeepsContent(t *testing.T) {
+	// When the working directory is granted, the script starts in it
+	// and sees its real content, not an empty tmpfs.
+	requireBwrap(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "data.txt"), []byte("here\n"), 0o644); err != nil {
+		t.Fatalf("cannot write data: %v", err)
+	}
+	t.Chdir(dir)
+
+	out, err := runIn(t, sandbox.Options{Cwd: dir, Readable: []string{dir}}, "pwd; cat data.txt")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "output", out, dir+"\nhere\n")
+}
+
+func TestWrapCwdEmptyStartsAtRoot(t *testing.T) {
+	// An empty Cwd leaves the working directory wherever bwrap starts
+	// it, usually /.
+	requireBwrap(t)
+	out, err := runIn(t, sandbox.Options{}, "pwd")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "output", out, "/\n")
+}
+
+func TestWrapCwdGrantBelowCwd(t *testing.T) {
+	// A grant at or below the working directory still mounts on top of
+	// the read-only cwd, not shadowed by it.
+	// A grant at or below the working directory still mounts on top of
+	// the cwd tmpfs, not shadowed by it.
+	requireBwrap(t)
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatalf("cannot create sub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "data.txt"), []byte("deep\n"), 0o644); err != nil {
+		t.Fatalf("cannot write data: %v", err)
+	}
+	t.Chdir(dir)
+
+	out, err := runIn(t, sandbox.Options{Cwd: dir, Readable: []string{sub}}, "pwd; ls; ls sub")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "output", out, dir+"\nsub\ndata.txt\n")
+}
+
+func TestWrapCwdRelativeGrant(t *testing.T) {
+	// Grants arrive from the parser as absolute paths; a grant
+	// covering the working directory means no tmpfs covers it.
+	requireBwrap(t)
+	dir := t.TempDir()
+	t.Chdir(dir)
+
+	out, err := runIn(t, sandbox.Options{Cwd: dir, Writable: []string{dir}}, "pwd; touch written; ls")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.HasPrefix(out, dir+"\n") {
+		t.Errorf("unexpected output: %q", out)
+	}
+	if !strings.Contains(out, "written") {
+		t.Errorf("cwd not writable via grant: %q", out)
+	}
+}
+
 func TestWrapReadableGrant(t *testing.T) {
 	requireBwrap(t)
 	dir := t.TempDir()

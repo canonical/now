@@ -55,7 +55,12 @@ func Run(ctx context.Context, script string, opts RunOptions) error {
 		shellArgs = append(shellArgs, "-x")
 	}
 	shellArgs = append(shellArgs, "-s")
-	shellArgs = append(shellArgs, opts.Args...)
+	if len(opts.Args) > 0 {
+		// The separator keeps arguments that start with "-" from
+		// being parsed as shell options after -s.
+		shellArgs = append(shellArgs, "--")
+		shellArgs = append(shellArgs, opts.Args...)
+	}
 
 	if opts.SandboxOn {
 		// Probing already happened in the caller, before generating

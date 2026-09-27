@@ -79,6 +79,11 @@ func Run(ctx context.Context, opts RunOptions) error {
 		for _, c := range parsed.Commands {
 			grants.Readable = append(grants.Readable, c.Path)
 		}
+		cwd, err := os.Getwd()
+		if err != nil {
+			return fmt.Errorf("cannot confine: %v", err)
+		}
+		grants.Cwd = cwd
 		bwrap, err := sandbox.Probe(grants, busyOpts.Path)
 		if err != nil {
 			return err

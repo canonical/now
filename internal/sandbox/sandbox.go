@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 )
 
 // Options carries the confinement configuration.
@@ -17,6 +18,15 @@ type Options struct {
 	Writable []string
 	// Network keeps the network available; it is unshared otherwise.
 	Network bool
+	// Cwd is the absolute working directory the confined command
+	// starts in. When it is at or below a granted path (or part of the
+	// implicit machinery), it is bound as usual; otherwise an empty
+	// read-only directory is mounted in its place: the directory
+	// exists and absolute paths look natural inside the sandbox, but
+	// any write fails loudly rather than silently succeeding in a
+	// throwaway tmpfs whose contents are discarded. Empty leaves the
+	// working directory wherever bwrap starts it, usually /.
+	Cwd string
 	// Bwrap carries the probed confinement configuration; it is filled
 	// by Probe and read by Args.
 	Bwrap Bwrap
@@ -129,6 +139,19 @@ func Args(opts Options, cmdpath string, cmdargs ...string) ([]string, error) {
 		args = append(args, "--share-net")
 	}
 
+	// The working directory always exists inside: bound when granted,
+	// an empty read-only mount otherwise (tmpfs plus a read-only
+	// bind of it onto itself). The tmpfs must come before the grant
+	// binds so a grant below the working directory still mounts on
+	// top of it rather than being shadowed.
+	if opts.Cwd != "" && opts.Cwd != "/" {
+		if !cwdGranted(opts, cmdpath) {
+			args = append(args, "--tmpfs", opts.Cwd)
+			args = append(args, "--ro-bind", opts.Cwd, opts.Cwd)
+		}
+		args = append(args, "--chdir", opts.Cwd)
+	}
+
 	// Machinery: the command being confined.
 	args = append(args, "--ro-bind", cmdpath, cmdpath)
 	for _, path := range implicit {
@@ -148,4 +171,33 @@ func Args(opts Options, cmdpath string, cmdargs ...string) ([]string, error) {
 	// The spread cannot mix with individual arguments, so -- and the
 	// command go on first, then the spread.
 	return append(append(args, "--", cmdpath), cmdargs...), nil
+}
+
+// cwdGranted reports whether the working directory is visible through
+// the existing binds: the confined command itself, the implicit
+// machinery, or a user grant at or above it. Grants are absolute paths
+// from the parser.
+func cwdGranted(opts Options, cmdpath string) bool {
+	covers := func(dir string) bool {
+		return dir != "" && (dir == opts.Cwd || strings.HasPrefix(opts.Cwd, dir+"/"))
+	}
+	if covers(cmdpath) {
+		return true
+	}
+	for _, dir := range implicit {
+		if _, err := os.Stat(dir); err == nil && covers(dir) {
+			return true
+		}
+	}
+	for _, dir := range opts.Readable {
+		if covers(dir) {
+			return true
+		}
+	}
+	for _, dir := range opts.Writable {
+		if covers(dir) {
+			return true
+		}
+	}
+	return false
 }

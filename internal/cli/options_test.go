@@ -168,6 +168,23 @@ func TestParseReadableFlag(t *testing.T) {
 	assertEqual(t, "Args", opts.Args, []string{"-r", dir})
 }
 
+func TestParseGrantsAreAbsolute(t *testing.T) {
+	// Grants are stored as absolute paths: bwrap resolves bind
+	// destinations against the sandbox root, where a relative path
+	// breaks the confinement.
+	dir := t.TempDir()
+	if err := os.Mkdir(filepath.Join(dir, "sub"), 0o755); err != nil {
+		t.Fatalf("cannot create sub: %v", err)
+	}
+	t.Chdir(dir)
+
+	opts := mustParse(t, []string{"-r", ".", "q"})
+	assertEqual(t, "Readable", opts.Readable, []string{dir})
+
+	opts = mustParse(t, []string{"-w", "sub", "q"})
+	assertEqual(t, "Writable", opts.Writable, []string{filepath.Join(dir, "sub")})
+}
+
 func TestParseReadableMissingPath(t *testing.T) {
 	// A grant on a missing path fails before any API call.
 	_, err := cli.Parse([]string{"-r", "/nosuch/path", "q"}, strings.NewReader(""))

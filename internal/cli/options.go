@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 
 	"github.com/niemeyer/now/internal/prompt"
@@ -62,24 +63,9 @@ func parseErrf(format string, args ...any) error {
 	return &ParseError{msg: fmt.Sprintf(format, args...)}
 }
 
-// usage is shown when --help is used.
 const usage = `Usage:
 
-  now [-y] [-q] [-t] [-c cmd,...] [-s] [-r path] [-w path] [-n] "<request>" [<arg> ...]
-
-  Arguments:
-
-  <request>    Natural language request for operation to perform.
-  <arg>        Data made available to the model and script, in order.
-  -            Reads either the request or the arguments from stdin.
-  -y           Auto-approve the generated script without asking.
-  -q           Auto-approve and also hide the script before running it.
-  -t           Print each script command to stderr as it executes.
-  -c cmd,...   Comma-separated external command names allowed for the script.
-  -s           Confine the script execution with bwrap.
-  -r path      When confined, grant the path readable (may repeat).
-  -w path      When confined, grant the path writable (may repeat).
-  -n           When confined, keep the network available.
+  now [options] "<request>" [<arg> ...]
 
 The now command generates a shell script to perform the requested
 operation, prints it for approval, and then executes it in busybox.
@@ -91,17 +77,31 @@ with the context provided.
 Arguments and standard input lines are flattened into a single ordered
 sequence that is made available to the model and the script in "$@".
 
-$ echo f1 f2 | ./now "cp [foo] files to [bar] dirs" [foo] - [bar] /d1 /d2
-for f in f1 f2; do
-  for d in /d1 /d2; do
-    cp "$f" "$d/"
+  $ echo f1 f2 | now "cp [foo] files to [bar] dirs" [foo] - [bar] /d1 /d2
+  for f in f1 f2; do
+    for d in /d1 /d2; do
+      cp "$f" "$d/"
+    done
   done
-done
-[ ENTER | CTRL-C ]
+  [ ENTER | CTRL-C ]
 
 The key to the success when using now is realizing that arguments have no
 explicit meaning. It's up to the request and the model to define it, and most
 often the model can tell what is meant with no further help. 
+
+Options:
+
+  <request>       Natural language request for operation to perform.
+  <arg>           Data made available to the model and script, in order.
+  -               Read either the request or the arguments from stdin.
+  -y              Auto-approve the generated script without asking.
+  -q              Auto-approve and also hide the script before running it.
+  -t              Trace each script command to stderr as it executes.
+  -c cmd,...      External command names from $PATH for the script to use.
+  -s              Force sandbox mode even without any -r and -w paths.
+  -r path -r ...  Force sandbox mode, allow read-only access to path.
+  -w path -w ...  Force sandbox mode, allow read-write access to path.
+  -n              Allow network usage when in sandbox mode.
 `
 
 // Parse parses the argument list (without the program name), reading stdin
@@ -241,23 +241,35 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 }
 
 // addReadable records path as readable, verifying it exists so a typo
-// fails before any API call.
+// fails before any API call. The grant is stored as an absolute path:
+// bwrap resolves bind destinations against the sandbox root, where a
+// relative path breaks the confinement.
 func addReadable(opts *Options, path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return parseErrf("cannot read %s: no such file or directory", path)
 	}
-	opts.Readable = append(opts.Readable, path)
+	opts.Readable = append(opts.Readable, absPath(path))
 	return nil
 }
 
 // addWritable records path as writable, verifying it exists so a typo
-// fails before any API call.
+// fails before any API call. The grant is stored as an absolute path,
+// like addReadable.
 func addWritable(opts *Options, path string) error {
 	if _, err := os.Stat(path); err != nil {
 		return parseErrf("cannot write %s: no such file or directory", path)
 	}
-	opts.Writable = append(opts.Writable, path)
+	opts.Writable = append(opts.Writable, absPath(path))
 	return nil
+}
+
+// absPath resolves p against the working directory.
+func absPath(p string) string {
+	abs, err := filepath.Abs(p)
+	if err != nil {
+		return p // unreachable on POSIX: Abs only fails on Getwd failure
+	}
+	return abs
 }
 
 func addCommands(opts *Options, list string) error {

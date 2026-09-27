@@ -37,6 +37,22 @@ func TestRunOutputsAndArgs(t *testing.T) {
 	assertEqual(t, "stdout", out.String(), "arg: one\narg: two words\n")
 }
 
+func TestRunLeadingDashArg(t *testing.T) {
+	// An argument starting with "-" must reach "$@" verbatim, not be
+	// parsed as a shell option after -s.
+	var out, errOut bytes.Buffer
+	err := engine.Run(context.Background(), `for a in "$@"; do echo "arg: $a"; done`, engine.RunOptions{
+		Args:    []string{"-r", "foo"},
+		Busybox: mustBusybox(t),
+		Stdout:  &out,
+		Stderr:  &errOut,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", out.String(), "arg: -r\narg: foo\n")
+}
+
 func TestRunScriptFailure(t *testing.T) {
 	var out bytes.Buffer
 	err := engine.Run(context.Background(), "echo before\necho oops >&2\nexit 3", engine.RunOptions{

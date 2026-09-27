@@ -32,11 +32,18 @@ script touches only what the user grants.
   already confining; `-c` alone never turns confinement on.
 - Grants must name existing paths (bwrap cannot bind to a nonexistent
   destination). Missing paths fail at parse time, before any model call.
+  Grants are stored as absolute paths — bwrap resolves bind destinations
+  against the sandbox root, where a relative path breaks the final
+  `execvp` (`--ro-bind . .` fails even with everything else bound).
 - The probe runs before script generation: a broken bwrap must not waste
   a model call and a human review. `TestRunSandboxFailsBeforeAPICall`
   pins this ordering (zero API requests on confinement failure).
 - Scripts see no `$PATH` inside the sandbox; every command invocation
   resolves through aliases to absolute paths (see _Architecture_).
+- The working directory always exists inside and `--chdir` puts the
+  script there: bound with real content when granted, an empty
+  read-only mount otherwise. A write to the ungranted cwd fails with
+  `EROFS` — never silently discards into a throwaway filesystem.
 
 
 # Architecture
@@ -84,8 +91,8 @@ sandbox-specific. The **alias prelude** solves (1): `engine.Run` prepends
 `alias <name>=<absolute-path>` lines for every `-c` command before the
 script. Every command is aliased uniformly — not only shadowing ones —
 because uniformity makes each granted command run exactly the binary
-resolved at parse time, and (incidentally) it also gives confined
-non-shadowing commands a resolution path, since `$PATH` directories are
+resolved at parse time, and it also gives confined non-shadowing
+commands a resolution path, since `$PATH` directories are
 not bound inside the sandbox.
 
 The shadow check (`IsBusyboxApplet`, a map built from a hardcoded
@@ -113,7 +120,7 @@ environments (containers whose seccomp blocks the mount) with
    a different proc form would be pointless and mask the cause).
 3. Retry once with `--ro-bind /proc /proc` (host procfs, read-only).
    This works wherever bwrap works, but exposes the host's process
-   list to the script — an accepted trade-off, recorded here.
+   list to the script.
 
 The result (`sandbox.Bwrap{Path, HostProc}`) is stored back into
 `Options.Bwrap` and reused; `Probe` short-circuits if already set.
@@ -127,6 +134,34 @@ sources at setup time from its own perspective, so it would snapshot
 bwrap's PID dir, not the child's. Per-reader `/proc/self` magic lives in
 procfs itself and does not survive a bind.
 
+## Working directory
+
+The confined command always starts in the host working directory:
+`--chdir` is unconditionally part of the vector (except when the cwd
+is `/`). The directory itself exists inside through one of two forms:
+
+- **Granted** (a user grant, the implicit machinery, or the confined
+  command's path covers it): bound as usual, real content, writable
+  per the grant.
+- **Not granted**: an empty read-only mount — `--tmpfs <cwd>`
+  followed by `--ro-bind <cwd> <cwd>`, which re-binds the fresh tmpfs
+  onto itself read-only.
+
+The read-only form is a deliberate rejection of the first version,
+which mounted a writable tmpfs as scratch: a script writing to the
+cwd would succeed silently and everything would be discarded with
+the sandbox. Failing loudly with `EROFS` is better than the script
+believing it created directories and files. bwrap has no `--ro-tmpfs`;
+the tmpfs-plus-self-ro-bind pair is the equivalent.
+
+Ordering: the cwd mount comes **before** the grant binds, so a grant
+below the cwd (e.g. `-r <cwd>/sub`) layers on top of the empty mount
+and shows its real content, rather than being shadowed by it.
+
+`cwdGranted` decides which form: the cwd counts as granted when the
+confined command's path, an implicit dir, or a user grant sits at or
+above it.
+
 ## Confinement machinery (implicit grants)
 
 Inside the sandbox, bwrap binds read-only, with no user data content:
@@ -135,6 +170,10 @@ Inside the sandbox, bwrap binds read-only, with no user data content:
   (via the readable grants the engine adds).
 - `/lib`, `/lib64`, `/usr/lib`, `/usr/lib/x86_64-linux-gnu` and
   `/etc/ld.so.cache` — existence-checked, so only present ones are bound.
+  **This list is provisional**: it was written for this devcontainer and
+  is wrong in both directions elsewhere (missing loader dirs on other
+  architectures/distros, or binding whole trees the binaries do not
+  need). Deriving the paths at probe time is tracked in TODO phase 11.
 - `--dev /dev` for devices, `--tmpfs /tmp` for scratch space,
   `--unshare-all` for namespaces (`--share-net` when `-n`).
 

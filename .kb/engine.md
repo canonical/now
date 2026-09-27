@@ -121,6 +121,10 @@ them as one problem.
 
 - The script is fed on **stdin** (`busybox sh -t? -s`) — no temp
   files, no artifacts — and `opts.Args` are delivered as `"$@"`.
+  A `--` separator precedes the arguments when any exist: without it,
+  busybox parses everything after `-s` as shell options, so an
+  argument starting with `-` (say `-r foo`) kills the script with
+  `sh: illegal option -r` before it runs.
 - `exec.CommandContext` throughout, so a canceled context (CTRL-C via
   the CLI's `signal.NotifyContext`) kills the process tree, including
   under bwrap.
