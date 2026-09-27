@@ -33,7 +33,7 @@ rules; this document carries the conventions themselves.
   *displayed* text's own capitalization independent of the
   identifier's.
 - **Help/usage output:** print the full usage text only when the user
-  explicitly asks for it (`-h`/`--help`) or gives no arguments at all.
+  explicitly asks for it (`--help`) or gives no arguments at all.
   Every other error gets a concise one-line message; don't append
   usage to it.
 - **Terminology:** the user-facing request is a "<request>", not a
@@ -105,8 +105,13 @@ design history is in `.kb/cli.md`.
   injected at that position. Empty lines are dropped.
 - `-c` takes a comma-separated command list; empty names are an
   error. `-r`/`-w` take paths that must exist.
+
 ## Workflow
 
 - Validate every change with `go vet ./... && go test ./...` before
   considering it done.
 - Keep `README.md` in sync with behavior changes.
+- When touching CLI flags — adding/changing/removing — update
+  both the usage message in `internal/cli/options.go` and the respective
+  code blocks in `README.md` in the same change. All these lists and the
+  parser must not drift apart.

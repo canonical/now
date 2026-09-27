@@ -288,6 +288,44 @@ func TestRunBusyboxFailsBeforeAPICall(t *testing.T) {
 	}
 }
 
+func TestRunNetworkEnforcesSandbox(t *testing.T) {
+	// -n turns confinement on like -r and -w: a broken bwrap with -n
+	// fails before the model is called, proving the sandbox is on.
+	f := completions.NewFakeLLM("SCRIPT\necho should-not-run\n")
+	url, err := f.Start()
+	if err != nil {
+		t.Fatalf("cannot start fake: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Stop() })
+
+	setupPath := filepath.Join(t.TempDir(), ".now")
+	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\n"), 0o600); err != nil {
+		t.Fatalf("cannot write setup: %v", err)
+	}
+
+	binDir := t.TempDir()
+	bwrap := filepath.Join(binDir, "bwrap")
+	if err := os.WriteFile(bwrap, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("cannot write bwrap: %v", err)
+	}
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	var stdout, stderr strings.Builder
+	err = cli.Run(context.Background(), cli.RunOptions{
+		Argv:      []string{"-y", "-n", "do something"},
+		Stdin:     strings.NewReader(""),
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		SetupPath: setupPath,
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot confine") {
+		t.Fatalf("expected confinement error, got %v", err)
+	}
+	if got := len(f.Requests()); got != 0 {
+		t.Fatalf("model was called %d times, want 0", got)
+	}
+}
+
 func TestRunErrorReply(t *testing.T) {
 	// The model's ERROR reason flows through the whole cycle unchanged.
 	_, _, err := e2e(t, []string{"do something"}, "ERROR cannot do that")

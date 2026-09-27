@@ -45,10 +45,10 @@ Options:
   -q              Auto-approve and also hide the script before running it.
   -t              Trace each script command to stderr as it executes.
   -c cmd,...      External command names from $PATH for the script to use.
-  -s              Force sandbox mode even without any -r and -w paths.
-  -r path -r ...  Force sandbox mode, allow read-only access to path.
-  -w path -w ...  Force sandbox mode, allow read-write access to path.
-  -n              Allow network usage when in sandbox mode.
+  -s              Enforce sandbox mode even without -r -w -n.
+  -r path -r ...  Enforce sandbox mode and allow read-only access to path.
+  -w path -w ...  Enforce sandbox mode and allow read-write access to path.
+  -n              Enforce sandbox mode and allow network usage.
 ```
 
 # Arguments and the standard input
@@ -150,10 +150,10 @@ system's constraints do not get in the way.
 
 Here is an overview of the relevant parameters:
 ```
-  -s              Force sandbox mode even without any -r and -w paths.
-  -r path -r ...  Force sandbox mode, allow read-only access to path.
-  -w path -w ...  Force sandbox mode, allow read-write access to path.
-  -n              Allow network usage when in sandbox mode.
+  -s              Enforce sandbox mode even without -r -w -n.
+  -r path -r ...  Enforce sandbox mode and allow read-only access to path.
+  -w path -w ...  Enforce sandbox mode and allow read-write access to path.
+  -n              Enforce sandbox mode and allow network usage.
 ```
 
 To explore the problem and the solution to this issue, consider this example:

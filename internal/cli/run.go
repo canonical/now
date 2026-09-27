@@ -108,7 +108,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 		Writable: parsed.Writable,
 		Network:  parsed.Network,
 	}
-	sandboxOn := parsed.Sandbox || len(parsed.Readable) > 0 || len(parsed.Writable) > 0
+	sandboxOn := parsed.Sandbox || parsed.Network || len(parsed.Readable) > 0 || len(parsed.Writable) > 0
 	if sandboxOn {
 		// The allowed commands are granted readable so their binaries
 		// are bound inside the sandbox.
