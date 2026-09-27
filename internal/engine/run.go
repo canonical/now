@@ -50,7 +50,9 @@ func Run(ctx context.Context, script string, opts RunOptions) error {
 	stdin.WriteString(aliasPrelude(opts.Commands))
 	stdin.WriteString(script)
 
-	shellArgs := []string{"sh"}
+	// -e aborts on the first failing command, so a half-executed
+	// script never reads as success.
+	shellArgs := []string{"sh", "-e"}
 	if opts.Trace {
 		shellArgs = append(shellArgs, "-x")
 	}
@@ -74,7 +76,8 @@ func Run(ctx context.Context, script string, opts RunOptions) error {
 		cmd.Stdout = opts.Stdout
 		cmd.Stderr = opts.Stderr
 		if err := cmd.Run(); err != nil {
-			return fmt.Errorf("cannot run script: %w", err)
+			// The script ran and failed — distinct from not running at all.
+			return fmt.Errorf("script failed: %w", err)
 		}
 		return nil
 	}
@@ -84,7 +87,7 @@ func Run(ctx context.Context, script string, opts RunOptions) error {
 	cmd.Stdout = opts.Stdout
 	cmd.Stderr = opts.Stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("cannot run script: %w", err)
+		return fmt.Errorf("script failed: %w", err)
 	}
 	return nil
 }

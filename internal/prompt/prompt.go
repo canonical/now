@@ -43,7 +43,7 @@ type BuildOptions struct {
 const fence = "```"
 
 const systemPrompt = `
-You generate one-shot shell scripts for busybox ash.
+You generate one-shot shell scripts for ` + "`busybox ash -e`" + `.
 
 ## RULES
 

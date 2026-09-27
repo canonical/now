@@ -53,6 +53,23 @@ func TestRunLeadingDashArg(t *testing.T) {
 	assertEqual(t, "stdout", out.String(), "arg: -r\narg: foo\n")
 }
 
+func TestRunStopsAtFirstFailure(t *testing.T) {
+	// -e aborts on the first failing command: the second command must
+	// not run, and the script reports the failure.
+	var out bytes.Buffer
+	err := engine.Run(context.Background(), "false\necho after >&2", engine.RunOptions{
+		Busybox: mustBusybox(t),
+		Stdout: &out,
+		Stderr: &out,
+	})
+	if err == nil || !strings.Contains(err.Error(), "script failed") {
+		t.Fatalf("expected run error, got %v", err)
+	}
+	if out.String() != "" {
+		t.Errorf("commands after the failure ran: %q", out.String())
+	}
+}
+
 func TestRunScriptFailure(t *testing.T) {
 	var out bytes.Buffer
 	err := engine.Run(context.Background(), "echo before\necho oops >&2\nexit 3", engine.RunOptions{
@@ -60,7 +77,7 @@ func TestRunScriptFailure(t *testing.T) {
 		Stdout: &out,
 		Stderr: &out,
 	})
-	if err == nil || !strings.Contains(err.Error(), "cannot run script") {
+	if err == nil || !strings.Contains(err.Error(), "script failed") {
 		t.Fatalf("expected run error, got %v", err)
 	}
 	if !strings.Contains(out.String(), "oops") {
@@ -182,7 +199,7 @@ func TestRunCanceled(t *testing.T) {
 	cancel()
 	var out bytes.Buffer
 	err := engine.Run(ctx, "sleep 5", engine.RunOptions{Busybox: mustBusybox(t), Stdout: &out, Stderr: &out})
-	if err == nil || !strings.Contains(err.Error(), "cannot run script") {
+	if err == nil || !strings.Contains(err.Error(), "script failed") {
 		t.Fatalf("expected run error, got %v", err)
 	}
 }
