@@ -6,6 +6,7 @@ package cli_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -64,6 +65,41 @@ func TestRunQuiet(t *testing.T) {
 	assertEqual(t, "stdout", stdout, "hello\n")
 	if strings.Contains(stderr, "echo hello") {
 		t.Errorf("script should be hidden: %q", stderr)
+	}
+}
+
+func TestRunAborted(t *testing.T) {
+	// Rejecting the generated script surfaces ErrAborted, which the
+	// caller prints as "aborted" without the error prefix. The TTY is
+	// injected: without it Approve would read the real /dev/tty.
+	f := completions.NewFakeLLM("SCRIPT\necho hello\n")
+	url, err := f.Start()
+	if err != nil {
+		t.Fatalf("cannot start fake: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Stop() })
+
+	setupPath := filepath.Join(t.TempDir(), ".now")
+	content := "api-url=" + url + "\napi-model=test\n"
+	if err := os.WriteFile(setupPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("cannot write setup: %v", err)
+	}
+
+	var stdout, stderr strings.Builder
+	err = cli.Run(context.Background(), cli.RunOptions{
+		Argv:      []string{"do something"},
+		Stdin:     strings.NewReader(""),
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		SetupPath: setupPath,
+		TTY:       strings.NewReader("n\n"),
+	})
+	if !errors.Is(err, cli.ErrAborted) {
+		t.Fatalf("expected ErrAborted, got %v", err)
+	}
+	assertEqual(t, "stdout", stdout.String(), "")
+	if !strings.Contains(stderr.String(), "echo hello") {
+		t.Errorf("script not shown on stderr: %q", stderr.String())
 	}
 }
 
@@ -143,8 +179,8 @@ func TestRunSampleConfigCancel(t *testing.T) {
 		Stderr: &stderr,
 		TTY:    strings.NewReader("n\n"),
 	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if !errors.Is(err, cli.ErrAborted) {
+		t.Fatalf("expected ErrAborted, got %v", err)
 	}
 	if _, err := os.Stat(filepath.Join(home, ".now")); !os.IsNotExist(err) {
 		t.Errorf("sample written despite cancel")

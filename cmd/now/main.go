@@ -8,6 +8,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 
@@ -21,6 +22,10 @@ func main() {
 		Stdout: os.Stdout,
 		Stderr: os.Stderr,
 	})
+	if errors.Is(err, cli.ErrAborted) {
+		fmt.Fprintln(os.Stderr, "aborted")
+		os.Exit(1)
+	}
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		os.Exit(1)

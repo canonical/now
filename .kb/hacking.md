@@ -81,6 +81,15 @@ rules; this document carries the conventions themselves.
 - **Parser bookkeeping stays out of `Options`:** the struct is
   intentionally minimal; stdin is handled inline during parsing, not
   via extra fields.
+- **Always inject the TTY in tests that reach approval.** Any test
+  whose execution path calls `Approve` must pass `RunOptions.TTY` (or
+  `ApprovalOptions.TTY`) with a reader delivering a decision. Without
+  it, `Approve` opens the real `/dev/tty` and blocks forever waiting
+  for input — the test hangs instead of failing. This bit twice: once
+  with an approval test, once with an abort test that reused the `e2e`
+  helper (which has no TTY injection). The `e2e` helper covers
+  `-y`/`-q` paths precisely because those never read the tty;
+  interactive paths need their own setup with an injected one.
 
 ## CLI semantics
 

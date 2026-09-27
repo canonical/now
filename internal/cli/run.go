@@ -54,6 +54,11 @@ END
 echo "Sample configuration saved, adjust as necessary: $1"
 `
 
+// ErrAborted is returned when the user rejects the script at approval.
+// It is a known outcome, not a failure: the caller prints "aborted"
+// without the error prefix.
+var ErrAborted = errors.New("aborted")
+
 // Run performs the full cycle: parse the arguments, load the setup,
 // generate the script, ask for approval, and run it. CTRL-C cancels
 // whichever phase is in progress.
@@ -161,7 +166,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 		return err
 	}
 	if !approved {
-		return nil
+		return ErrAborted
 	}
 
 	// Grants: explicit -r/-w paths. Confinement turns the network off
