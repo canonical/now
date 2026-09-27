@@ -143,6 +143,41 @@ func TestParseRequestOnly(t *testing.T) {
 	assertEqual(t, "Args", opts.Args, []string(nil))
 }
 
+func TestParseBundledFlags(t *testing.T) {
+	// Boolean flags bundle: -qt sets both, in any order and mix.
+	opts := mustParse(t, []string{"-qt", "q"})
+	if !opts.Quiet || !opts.Trace {
+		t.Errorf("-qt: Quiet=%v Trace=%v, want both true", opts.Quiet, opts.Trace)
+	}
+
+	opts = mustParse(t, []string{"-tq", "q"})
+	if !opts.Quiet || !opts.Trace {
+		t.Errorf("-tq: Quiet=%v Trace=%v, want both true", opts.Quiet, opts.Trace)
+	}
+
+	opts = mustParse(t, []string{"-ytsn", "q"})
+	if !opts.Yes || !opts.Trace || !opts.Sandbox || !opts.Network {
+		t.Errorf("-ytsn: not all flags set")
+	}
+
+	// A bundle with a non-boolean letter names it, so -r and friends
+	// make sense in the message.
+	_, err := cli.Parse([]string{"-qx", "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), `"x" is not a boolean flag: "-qx"`) {
+		t.Fatalf("expected unknown flag error, got %v", err)
+	}
+	_, err = cli.Parse([]string{"-qr", "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), `"r" is not a boolean flag: "-qr"`) {
+		t.Fatalf("expected non-boolean flag error, got %v", err)
+	}
+
+	// Bundles are still only recognized before the request.
+	opts = mustParse(t, []string{"q", "-qt"})
+	if opts.Quiet || opts.Trace {
+		t.Errorf("bundle after request parsed as flags")
+	}
+}
+
 func TestParseSandboxFlag(t *testing.T) {
 	opts := mustParse(t, []string{"-s", "q"})
 	if !opts.Sandbox {
@@ -303,12 +338,10 @@ func TestParseFlagAfterRequestIsPath(t *testing.T) {
 }
 
 func TestParseHelp(t *testing.T) {
-	for _, flag := range []string{"-h", "--help"} {
-		_, err := cli.Parse([]string{flag}, strings.NewReader(""))
-		var hr *cli.HelpRequested
-		if !errors.As(err, &hr) {
-			t.Errorf("cli.Parse(%q): expected cli.HelpRequested, got %v", flag, err)
-		}
+	_, err := cli.Parse([]string{"--help"}, strings.NewReader(""))
+	var hr *cli.HelpRequested
+	if !errors.As(err, &hr) {
+		t.Errorf("cli.Parse(--help): expected cli.HelpRequested, got %v", err)
 	}
 }
 

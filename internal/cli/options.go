@@ -178,24 +178,17 @@ func readStdin(r io.Reader) ([]string, error) {
 }
 
 // parseFlags extracts leading flags; the request and paths follow.
+// Boolean flags may be bundled, as in -qt; flags taking a value cannot.
 func parseFlags(argv []string, opts *Options) ([]string, error) {
 	i := 0
 	for i < len(argv) {
 		arg := argv[i]
 		switch {
-		case arg == "-h" || arg == "--help":
+		case arg == "--help":
 			return nil, &HelpRequested{}
-		case arg == "-y":
-			opts.Yes = true
-		case arg == "-q":
-			opts.Quiet = true
-		case arg == "-t":
-			opts.Trace = true
-		case arg == "-s":
-			opts.Sandbox = true
-		// -r and -w stay plain and separate: -w implies read too, and we
-		// do not want to take over -x, as it may come some day with an
-		// execution semantics that bwrap alone cannot express.
+		// -r, -w, and -c stay plain and separate: -w implies read too,
+		// and we do not want to take over -x, as it may come some day
+		// with an execution semantics that bwrap alone cannot express.
 		case arg == "-r":
 			if i+1 >= len(argv) {
 				return nil, parseErrf("-r requires a path")
@@ -220,8 +213,6 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 			if err := addWritable(opts, strings.TrimPrefix(arg, "-w=")); err != nil {
 				return nil, err
 			}
-		case arg == "-n":
-			opts.Network = true
 		case arg == "-c":
 			if i+1 >= len(argv) {
 				return nil, parseErrf("-c requires a comma-separated list of commands")
@@ -233,6 +224,23 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 		case strings.HasPrefix(arg, "-c="):
 			if err := addCommands(opts, strings.TrimPrefix(arg, "-c=")); err != nil {
 				return nil, err
+			}
+		case len(arg) > 1 && arg[0] == '-' && strings.TrimRight(arg, "abcdefghijklmnopqrstuvwxyz") == "-":
+			for _, flag := range arg[1:] {
+				switch flag {
+				case 'y':
+					opts.Yes = true
+				case 'q':
+					opts.Quiet = true
+				case 't':
+					opts.Trace = true
+				case 's':
+					opts.Sandbox = true
+				case 'n':
+					opts.Network = true
+				default:
+					return nil, parseErrf("%q is not a boolean flag: %q", string(flag), arg)
+				}
 			}
 		case strings.HasPrefix(arg, "-") && arg != "-":
 			return nil, parseErrf("unknown flag %q", arg)
