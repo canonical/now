@@ -1,4 +1,20 @@
-# Overview
+# The 'now' tool
+
+AI for sensitive terminal environments in a classic way.
+
+## Contents
+
+- [Overview](#overview)
+- [Usage](#usage)
+- [Configuration](#configuration)
+- [Arguments and the standard input](#arguments-and-the-standard-input)
+- [Busybox and arbitrary commands](#busybox-and-arbitrary-commands)
+- [Security and safety](#security-and-safety)
+- [Sandboxing and isolation](#sandboxing-and-isolation)
+- [Further examples](#further-examples)
+- [License](#license)
+
+## Overview
 
 The command is a single binary named **now**, written in Go with no dependencies outside of the standard library, that
 accepts an arbitrary request in human language, prints a script for approval that performs the operation, and once
@@ -13,7 +29,7 @@ printf '1\n2\n3\n4\n5\n' | awk '$1 % 2 == 0 { s += $1 } END { print s }'
 To perform its job the command sends a query to a v1 completions-compatible LLM API to generate a script to do the requested task.
 The remote model only has access to the request and the provided data, and the generated script must solve the requested task
 as a one-shot operation, without going back to the model again. The request may require reading local content, but if you do
-not explicitly provide the content the model must construct the script to access the required content and autonomously
+not explicitly provide the content, the model must construct the script to access the required content and autonomously
 solve the task locally during the script execution.
 
 ```
@@ -29,7 +45,8 @@ wc -l < /chroot/passwd
 [ ENTER | CTRL-C ]
 ```
 
-# Usage
+
+## Usage
 
 ```
 Usage:
@@ -44,14 +61,33 @@ Options:
   -y              Auto-approve the generated script without asking.
   -q              Auto-approve and also hide the script before running it.
   -t              Trace each script command to stderr as it executes.
+  -b              Buffer script output and only show it on failure.
   -c cmd,...      External command names from $PATH for the script to use.
   -s              Enforce sandbox mode even without -r -w -n.
   -r path -r ...  Enforce sandbox mode and allow read-only access to path.
   -w path -w ...  Enforce sandbox mode and allow read-write access to path.
   -n              Enforce sandbox mode and allow network usage.
+
+Boolean flags may be bundled together.
 ```
 
-# Arguments and the standard input
+
+## Configuration
+
+The configuration is loaded from `$HOME/.now` using a simple _key=value_ format:
+```
+api-url=http://127.0.0.1:11434
+api-key=abc...
+api-model=default
+api-type=completions-v1
+```
+The `api-model` key selects the model name sent to the API. It defaults to `default` if unset.
+The `api-type` key selects the API kind; only `completions-v1` is supported for now, and it is the default, so the key may be omitted.
+
+If you run _now_ without a valid configuration, it will propose a script for creating it.
+
+
+## Arguments and the standard input
 
 Information related to the request is made available to the model either via command line arguments, or via the standard
 input by using the classic `-` argument. All of these are valid command lines:
@@ -81,7 +117,7 @@ The key to the success when using _now_ is realizing that arguments have no expl
 define it, and most often the model can tell what you mean with no further help. 
 
 
-# Busybox and arbitrary commands
+## Busybox and arbitrary commands
 
 The _busybox_ project was chosen as the execution environment because it's a battle tested, compact, fast, and rich environment
 where most important commands are supported without even executing an external process. Being mostly standalone also
@@ -107,7 +143,7 @@ download.sh --source="$1" --output="$2"
 ```
 
 
-# Security and safety
+## Security and safety
 
 The only data that is ever sent to the model is the data you explicitly provided via the arguments and standard input. There's
 no tool calling, no multi-turn decision making that the model can do by itself, no environment variables. If you don't put it
@@ -139,7 +175,7 @@ impactful data operations are done completely locally, explicitly, in a declared
 and why I feel confident in using it even in sensitive environments.
 
 
-# Sandboxing and isolation
+## Sandboxing and isolation
 
 The section above covers security and safety from an architectural standpoint: the trust model, the separation of concerns,
 the review and approval process. Even then, there are times when this might not be enough; for example, when the complexity
@@ -192,7 +228,7 @@ error: script failed: exit status 1
 ```
 
 
-# Further examples
+## Further examples
 
 All of these examples were generated on a local _Qwen 3.8 27B Q4_ model running on _llama.cpp_.
 
@@ -202,6 +238,18 @@ All of these examples were generated on a local _Qwen 3.8 27B Q4_ model running 
 $ now "greet the world"                                          
 echo "Hello world!"
 [ ENTER | CTRL-C ]
+```
+
+### Tracing, quietly, on errors
+
+```
+$ ./now -tqb "print the cwd"
+
+$ ./now -tqb "print the cwd then fail"
++ pwd
+/home/ubuntu
++ exit 1
+error: script failed: exit status 1
 ```
 
 ### One question, three data sources
@@ -241,7 +289,7 @@ mv bar/three.txt bar/3.txt
 ### Python on-the-fly
 
 ```
-$ echo 9 | python3 -c "$(now 'print a py program that prints the sqrt of the number in stdin')"
+$ echo 9 | python3 -c "$(now 'print a py program that prints the sqrt of the number from stdin')"
 cat << 'EOF'
 import math
 print(math.sqrt(float(input())))
@@ -258,21 +306,8 @@ $ echo 9 | python3 -c "$(now -q 'print a py program that prints the sqrt of the 
 3.0
 ```
 
-# Configuration
 
-The configuration is loaded from `$HOME/.now` using a simple _key=value_ format:
-```
-api-url=http://127.0.0.1:11434
-api-key=abc...
-api-model=default
-api-type=completions-v1
-```
-The `api-model` key selects the model name sent to the API. It defaults to `default` if unset.
-The `api-type` key selects the API kind; only `completions-v1` is supported for now, and it is the default, so the key may be omitted.
-
-If you run _now_ without a valid configuration, it will propose a script for creating it.
-
-# License
+## License
 
 The _now_ project is made available under the terms of the MIT license,
 with the copyright held by Canonical Inc. See the `LICENSE` file for details.

@@ -25,13 +25,17 @@ func approve(t *testing.T, opts cli.ApprovalOptions) (bool, string) {
 }
 
 func TestApproveYes(t *testing.T) {
+	// -y approves without asking; the ENTER separator and the blank
+	// line print, matching the interactive path where the user's
+	// ENTER echoes a newline.
 	ok, out := approve(t, cli.ApprovalOptions{Script: "the script", Yes: true})
 	assertEqual(t, "approved", ok, true)
-	assertEqual(t, "stderr", out, "the script\n")
+	assertEqual(t, "stderr", out, "the script\n[ ENTER | CTRL-C ]\n\n")
 }
 
 func TestApproveQuiet(t *testing.T) {
-	// -q approves without showing the script.
+	// -q approves without showing the script, and the separator is
+	// suppressed too: nothing is produced.
 	ok, out := approve(t, cli.ApprovalOptions{Script: "the script", Quiet: true})
 	assertEqual(t, "approved", ok, true)
 	assertEqual(t, "stderr", out, "")

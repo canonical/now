@@ -103,6 +103,61 @@ func TestRunAborted(t *testing.T) {
 	}
 }
 
+func TestRunBufferedHidesSuccess(t *testing.T) {
+	// -by buffers the script review and the ENTER separator along with
+	// the script's output; a successful run produces nothing at all.
+	stdout, stderr, err := e2e(t, []string{"-y", "-b", "do something"}, "SCRIPT\necho hello\necho err >&2\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", stdout, "")
+	assertEqual(t, "stderr", stderr, "")
+}
+
+func TestRunBufferedAloneShowsReview(t *testing.T) {
+	// -b alone: the script review and the ENTER separator go to the
+	// real stderr — the user cannot approve a script they cannot see —
+	// and only the execution output is buffered.
+	f := completions.NewFakeLLM("SCRIPT\necho hello\n")
+	url, err := f.Start()
+	if err != nil {
+		t.Fatalf("cannot start fake: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Stop() })
+
+	setupPath := filepath.Join(t.TempDir(), ".now")
+	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\n"), 0o600); err != nil {
+		t.Fatalf("cannot write setup: %v", err)
+	}
+
+	var stdout, stderr strings.Builder
+	err = cli.Run(context.Background(), cli.RunOptions{
+		Argv:      []string{"-b", "do something"},
+		Stdin:     strings.NewReader(""),
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		SetupPath: setupPath,
+		TTY:       strings.NewReader("\n"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", stdout.String(), "")
+	assertEqual(t, "stderr", stderr.String(), "echo hello\n[ ENTER | CTRL-C ]\n")
+}
+
+func TestRunBufferedShowsFailure(t *testing.T) {
+	// -b shows the captured output when the script fails.
+	stdout, stderr, err := e2e(t, []string{"-y", "-b", "do something"}, "SCRIPT\necho hello\nexit 3\n")
+	if err == nil || !strings.Contains(err.Error(), "script failed") {
+		t.Fatalf("expected run error, got %v", err)
+	}
+	assertEqual(t, "stdout", stdout, "")
+	if !strings.Contains(stderr, "hello") {
+		t.Errorf("buffered output missing on failure: %q", stderr)
+	}
+}
+
 func TestRunNoTerminalRejects(t *testing.T) {
 	// Without -y/-q and without a controlling terminal, approval fails
 	// as an error and the script does not run. Only meaningful in

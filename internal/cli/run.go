@@ -5,6 +5,7 @@
 package cli
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -155,11 +156,27 @@ func Run(ctx context.Context, opts RunOptions) error {
 		args = parsed.Args
 	}
 
+	// Buffered mode captures the script's output and shows it only when
+	// the script fails, so a successful run stays quiet. The approval
+	// output joins the buffer only when auto-approving (-by: the review
+	// is informational); with -b alone the user must see the script to
+	// approve it, so the review goes to the real stderr and only the
+	// execution output is buffered. With -q nothing is produced.
+	stdout, stderr := opts.Stdout, opts.Stderr
+	var buffer bytes.Buffer
+	if parsed.Buffered {
+		stdout, stderr = &buffer, &buffer
+	}
+	approveOut := opts.Stderr
+	if parsed.Buffered && (parsed.Yes || parsed.Quiet) {
+		approveOut = &buffer
+	}
+
 	approved, err := Approve(ctx, ApprovalOptions{
 		Script: script,
 		Yes:    parsed.Yes,
 		Quiet:  parsed.Quiet,
-		Stderr: opts.Stderr,
+		Stderr: approveOut,
 		TTY:    opts.TTY,
 	})
 	if err != nil {
@@ -175,13 +192,16 @@ func Run(ctx context.Context, opts RunOptions) error {
 
 	err = engine.Run(ctx, script, engine.RunOptions{
 		Args:      args,
-		Stdout:    opts.Stdout,
-		Stderr:    opts.Stderr,
+		Stdout:    stdout,
+		Stderr:    stderr,
 		Trace:     parsed.Trace,
 		Commands:  parsed.Commands,
 		Busybox:   busyOpts,
 		SandboxOn: sandboxOn,
 		Sandbox:   grants,
 	})
+	if err != nil && parsed.Buffered {
+		buffer.WriteTo(opts.Stderr)
+	}
 	return err
 }
