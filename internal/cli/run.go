@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/signal"
 
@@ -28,7 +29,26 @@ type RunOptions struct {
 	Stderr io.Writer
 	// SetupPath selects the configuration file; empty means $HOME/.now.
 	SetupPath string
+	// TTY overrides where approval is read from; the controlling
+	// terminal by default. A test seam, like ApprovalOptions.TTY.
+	TTY io.Reader
 }
+
+// sampleScript writes a sample configuration to the file given as "$1",
+// then prints where it landed so the user knows what to adjust. Every
+// key is a commented placeholder, so an unedited sample fails loading
+// with the honest missing-key error.
+const sampleScript = `
+# CONFIGURATION IS MISSING: This script creates a sample at $HOME/.now
+
+cat > "$1" <<'END'
+#api-url=http://128.0.0.1:11434
+#api-key=
+#api-model=local
+#api-type=completions-v1
+END
+echo "Sample configuration saved, adjust as necessary: $1"
+`
 
 // Run performs the full cycle: parse the arguments, load the setup,
 // generate the script, ask for approval, and run it. CTRL-C cancels
@@ -53,7 +73,14 @@ func Run(ctx context.Context, opts RunOptions) error {
 	} else {
 		setupOpts, err = setup.LoadFrom(opts.SetupPath)
 	}
-	if err != nil {
+	proposeSample := false
+	if errors.Is(err, fs.ErrNotExist) && !parsed.Yes && !parsed.Quiet {
+		// The configuration is missing and the resulting script will be
+		// reviewed. Propose the creation of a sample script and inform
+		// the user of the proper path.
+		proposeSample = true
+		err = nil
+	} else if err != nil {
 		return err
 	}
 
@@ -91,17 +118,32 @@ func Run(ctx context.Context, opts RunOptions) error {
 		grants.Bwrap = bwrap
 	}
 
-	script, err := engine.Generate(ctx, engine.GenerateOptions{
-		Request:  parsed.Request,
-		Args:     parsed.Args,
-		Commands: parsed.Commands,
-		Busybox:  busyOpts,
-		Complete: func(ctx context.Context, messages []prompt.Message) (string, error) {
-			return completions.Complete(ctx, *setupOpts, messages)
-		},
-	})
-	if err != nil {
-		return err
+	// From here on the cycle is shared: only the script source differs.
+	var script string
+	var args []string
+	if proposeSample {
+		configPath, err := setup.DefaultPath()
+		if err != nil {
+			return err
+		}
+		// It's a known script, and will be prompted.
+		sandboxOn = false
+		script = sampleScript
+		args = []string{configPath}
+	} else {
+		script, err = engine.Generate(ctx, engine.GenerateOptions{
+			Request:  parsed.Request,
+			Args:     parsed.Args,
+			Commands: parsed.Commands,
+			Busybox:  busyOpts,
+			Complete: func(ctx context.Context, messages []prompt.Message) (string, error) {
+				return completions.Complete(ctx, *setupOpts, messages)
+			},
+		})
+		if err != nil {
+			return err
+		}
+		args = parsed.Args
 	}
 
 	approved, err := Approve(ctx, ApprovalOptions{
@@ -109,6 +151,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 		Yes:    parsed.Yes,
 		Quiet:  parsed.Quiet,
 		Stderr: opts.Stderr,
+		TTY:    opts.TTY,
 	})
 	if err != nil {
 		return err
@@ -121,8 +164,8 @@ func Run(ctx context.Context, opts RunOptions) error {
 	// unless -n opts in. The grants were assembled and probed above,
 	// before generating the script.
 
-	return engine.Run(ctx, script, engine.RunOptions{
-		Args:      parsed.Args,
+	err = engine.Run(ctx, script, engine.RunOptions{
+		Args:      args,
 		Stdout:    opts.Stdout,
 		Stderr:    opts.Stderr,
 		Trace:     parsed.Trace,
@@ -131,4 +174,5 @@ func Run(ctx context.Context, opts RunOptions) error {
 		SandboxOn: sandboxOn,
 		Sandbox:   grants,
 	})
+	return err
 }

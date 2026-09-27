@@ -93,6 +93,85 @@ func TestRunTrace(t *testing.T) {
 	}
 }
 
+func TestRunSampleConfigOffer(t *testing.T) {
+	// A missing configuration with a human reviewing scripts offers the
+	// sample script through the normal approval cycle; on approval the
+	// file is written and the script prints the pointer to it. No model
+	// call happens.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	var stdout, stderr strings.Builder
+	err := cli.Run(context.Background(), cli.RunOptions{
+		Argv:   []string{"do something"},
+		Stdin:  strings.NewReader(""),
+		Stdout: &stdout,
+		Stderr: &stderr,
+		TTY:    strings.NewReader("\n"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(home, ".now"))
+	if err != nil {
+		t.Fatalf("cannot read sample: %v", err)
+	}
+	if !strings.Contains(string(data), "#api-url=") {
+		t.Errorf("unexpected sample content: %q", data)
+	}
+	if !strings.Contains(stderr.String(), "adjust as necessary") {
+		t.Errorf("sample script not shown for review: %q", stderr.String())
+	}
+	assertEqual(t, "stdout", stdout.String(), "Sample configuration saved, adjust as necessary: "+filepath.Join(home, ".now")+"\n")
+}
+
+func TestRunSampleConfigCancel(t *testing.T) {
+	// Declining the sample script leaves nothing behind.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	var stdout, stderr strings.Builder
+	err := cli.Run(context.Background(), cli.RunOptions{
+		Argv:   []string{"do something"},
+		Stdin:  strings.NewReader(""),
+		Stdout: &stdout,
+		Stderr: &stderr,
+		TTY:    strings.NewReader("n\n"),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".now")); !os.IsNotExist(err) {
+		t.Errorf("sample written despite cancel")
+	}
+}
+
+func TestRunSampleConfigNotOfferedUnattended(t *testing.T) {
+	// -y (and -q) get the plain missing-config error, not the offer:
+	// the side channel only exists with a human reviewing scripts.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	var stdout, stderr strings.Builder
+	err := cli.Run(context.Background(), cli.RunOptions{
+		Argv:   []string{"-y", "do something"},
+		Stdin:  strings.NewReader(""),
+		Stdout: &stdout,
+		Stderr: &stderr,
+		TTY:    strings.NewReader(""),
+	})
+	if err == nil || !strings.Contains(err.Error(), "cannot open") {
+		t.Fatalf("expected missing config error, got %v", err)
+	}
+	if strings.Contains(stderr.String(), "adjust as necessary") {
+		t.Errorf("sample offered despite -y: %q", stderr.String())
+	}
+	if _, err2 := os.Stat(filepath.Join(home, ".now")); !os.IsNotExist(err2) {
+		t.Errorf("sample written despite -y")
+	}
+}
+
 func TestRunSandboxFailsBeforeAPICall(t *testing.T) {
 	// Confinement problems must surface before the model is called: no
 	// request is sent, no script generated, nothing to review. A broken

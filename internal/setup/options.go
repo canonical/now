@@ -29,6 +29,15 @@ func Load() (*Options, error) {
 	return LoadFrom(filepath.Join(home, ".now"))
 }
 
+// DefaultPath is the configuration file path, $HOME/.now.
+func DefaultPath() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot discover home directory: %w", err)
+	}
+	return filepath.Join(home, ".now"), nil
+}
+
 // LoadFrom reads the configuration from the given file path.
 func LoadFrom(path string) (*Options, error) {
 	opts := &Options{APIModel: "default", APIType: "completions-v1"}
