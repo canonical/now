@@ -270,21 +270,9 @@ api-type=completions-v1
 The `api-model` key selects the model name sent to the API. It defaults to `default` if unset.
 The `api-type` key selects the API kind; only `completions-v1` is supported for now, and it is the default, so the key may be omitted.
 
-# Execution environment
+If you run _now_ without a valid configuration, it will propose a script for creating it.
 
-The provided shell command is run with _busybox_ and confined with _bwrap._ Only the paths explicitly provided on the CLI will
-be accessible to busybox, so even if the reviewed script is doing something inadequate, only the specific paths listed can
-be affected. If directory names are listed, their full content is accessible to the generated script (not the model).
+# License
 
-# External commands
-
-It is possible to allow external commands to be explicitly used via the -w (with) argument:
-```
-$ now -w curl "fetch with the bearer s3cr3t" http://.../data.txt ./data.txt
-```
-The ./data.txt parameter is required as it allows the path to be written into. Alternatively, a directory path might also
-be used, granting the generated script (not the model) access to its full content.
-
-This mechanims works with arbitrary commands, as long as they support the --help argument. The command names are looked
-for in the `$PATH`, and multiple commands may be provided by separating them with a comma. The model may decide not to use
-the provided commands, though, as it's entirely up to the model how to best perform the requested task.
+The _now_ project is made available under the terms of the MIT license,
+with the copyright held by Canonical Inc. See the `LICENSE` file for details.

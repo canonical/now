@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Canonical Inc.
+// Originally by Gustavo Niemeyer.
+// Use of source code is governed by the MIT-style license in the LICENSE file.
+
 // Package cli implements the command-line argument parsing for now.
 package cli
 

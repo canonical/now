@@ -1,3 +1,7 @@
+// Copyright (c) 2026 Canonical Inc.
+// Originally by Gustavo Niemeyer.
+// Use of source code is governed by the MIT-style license in the LICENSE file.
+
 // Package prompt builds the messages sent to the model.
 package prompt
 
