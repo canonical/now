@@ -26,12 +26,12 @@ var testMessages = []prompt.Message{
 }
 
 func TestCompleteSuccess(t *testing.T) {
-	f, url := startFake(t, "SCRIPT\necho hi")
+	f, url := startFake(t, "-$-SCRIPT-START-$-\necho hi-$-SCRIPT-END-$-\n")
 	got, err := completions.Complete(context.Background(), clientOpts(url), testMessages)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertEqual(t, "content", got, "SCRIPT\necho hi")
+	assertEqual(t, "content", got, "-$-SCRIPT-START-$-\necho hi-$-SCRIPT-END-$-\n")
 
 	// The recorded request must carry the model and the messages.
 	req := f.LastRequest()

@@ -51,19 +51,31 @@ You generate one-shot shell scripts for ` + "`busybox ash -e`" + `.
 
 ## RULES
 
-1. If you cannot satisfy the request, output ONLY an ERROR line, as in this example:
-` + fence + `
-ERROR cannot move a file to itself: /file/path
-` + fence + `
-2. If you can satisfy the request, output ONLY a SCRIPT line, and then the script itself, no chat, no code block:
-` + fence + `
-SCRIPT
+1. If you cannot satisfy the request, output ONLY the error itself in this format and text style:
+
+-$-ERROR-START-$-
+cannot perform request: incorrect move parameters: /file/path is both the source and the target
+-$-ERROR-END-$-
+
+2. If you cannot satisfy the request because a required command is not explicitly allowed, fail clearly:
+
+-$-ERROR-START-$-
+cannot perform request: required command 'python3' is not allowed (see -c)
+-$-ERROR-END-$-
+
+3. If you CAN satisfy the request, output ONLY the script itself in this format:
+
+-$-SCRIPT-START-$-
 echo 'Hello world'
-` + fence + `
-3. You have ONE chance: completely solve the request with SCRIPT, or fail with ERROR.
-4. Use ONLY the explicitly allowed command line tools.
-5. DO NOT USE path wildcards unless you are unequivocally sure only the requested paths will be affected.
-6. Solve the task in a simple, clean, readable way, what an experienced professional would do.
+-$-SCRIPT-END-$-
+
+4. You have ONE chance: completely solve the request with SCRIPT, or fail with ERROR.
+
+5. Use ONLY the explicitly allowed command line tools.
+
+6. DO NOT USE path wildcards unless you are unequivocally sure only the requested paths will be affected.
+
+7. Solve the task in a simple, clean, readable way, what an experienced professional would do.
 `
 
 // Build creates the system and user messages for the given options.
