@@ -55,8 +55,12 @@ script touches only what the user grants.
   has no write-only bind). Same repetition and `=`-form rules.
 - `-c cmd,...` — allow external commands; resolved via `$PATH` at parse
   time, `--help` captured verbatim for the prompt (no truncation, no
-  caching). Commands that lack `--help` are accepted with empty help.
-  Missing commands are a hard parse error (fail-fast, no model call).
+  caching). Commands that lack `--help` are accepted with empty help —
+  a best-effort grace, not a working path: the model then gets only the
+  name in ALLOWED COMMANDS, no reference entry, and cannot be expected
+  to guess the syntax of an unknown command. `--help` support is what
+  makes an external command usable. Missing commands are a hard parse
+  error (fail-fast, no model call).
 - `-n` — keep the network when confined.
 - `-s` — confine even without grants.
 - Flags are recognized only before the request; afterwards they are
