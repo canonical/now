@@ -167,10 +167,10 @@ func TestSystemPromptPinned(t *testing.T) {
 	sys := msgs[0].Content
 	for _, want := range []string{
 		"busybox ash",
-		"-$-SCRIPT-START-$-",
-		"-$-SCRIPT-END-$-",
-		"-$-ERROR-START-$-",
-		"-$-ERROR-END-$-",
+		"---SCRIPT-START---",
+		"---SCRIPT-END---",
+		"---ERROR-START---",
+		"---ERROR-END---",
 		"Use ONLY the explicitly allowed command line tools.",
 	} {
 		if !strings.Contains(sys, want) {

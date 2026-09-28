@@ -57,6 +57,13 @@ type BuildOptions struct {
 // sidesteps the fact that a raw string cannot contain backticks.
 const fence = "```"
 
+// systemPrompt is the contract the model must obey. The reply is
+// delimited by plain literal markers (---SCRIPT-START--- etc.) rather
+// than markdown fences. The format is deliberately this simple:
+// smaller models struggle to respect complex nested or decorated
+// delimiters, but a single literal line on its own is something even
+// modest models emit reliably. The same shape carries a failure
+// reason between ---ERROR-START--- and ---ERROR-END---.
 const systemPrompt = `
 You generate one-shot shell scripts for ` + "`busybox ash -e`" + `.
 
@@ -64,21 +71,21 @@ You generate one-shot shell scripts for ` + "`busybox ash -e`" + `.
 
 1. If you cannot satisfy the request, output ONLY the error itself in this format and text style:
 
--$-ERROR-START-$-
+---ERROR-START---
 cannot perform request: incorrect move parameters: /file/path is both the source and the target
--$-ERROR-END-$-
+---ERROR-END---
 
 2. If you cannot satisfy the request because a required command is not explicitly allowed, fail clearly:
 
--$-ERROR-START-$-
+---ERROR-START---
 cannot perform request: required command 'python3' is not allowed (see -c)
--$-ERROR-END-$-
+---ERROR-END---
 
 3. If you CAN satisfy the request, output ONLY the script itself in this format:
 
--$-SCRIPT-START-$-
+---SCRIPT-START---
 echo 'Hello world'
--$-SCRIPT-END-$-
+---SCRIPT-END---
 
 4. You have ONE chance: completely solve the request with SCRIPT, or fail with ERROR.
 

@@ -57,7 +57,7 @@ func e2e(t *testing.T, argv []string, reply string) (string, string, error) {
 
 func TestRunYes(t *testing.T) {
 	// -y runs the script; stdout gets only the script's output.
-	stdout, stderr, err := e2e(t, []string{"-y", "do something", "one"}, "-$-SCRIPT-START-$-\necho \"arg: $1\"\n-$-SCRIPT-END-$-\n")
+	stdout, stderr, err := e2e(t, []string{"-y", "do something", "one"}, "---SCRIPT-START---\necho \"arg: $1\"\n---SCRIPT-END---\n")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -69,7 +69,7 @@ func TestRunYes(t *testing.T) {
 
 func TestRunQuiet(t *testing.T) {
 	// -q runs the script without showing it.
-	stdout, stderr, err := e2e(t, []string{"-q", "do something"}, "-$-SCRIPT-START-$-\necho hello\n-$-SCRIPT-END-$-\n")
+	stdout, stderr, err := e2e(t, []string{"-q", "do something"}, "---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestRunAborted(t *testing.T) {
 	// Rejecting the generated script surfaces ErrAborted, which the
 	// caller prints as "aborted" without the error prefix. The TTY is
 	// injected: without it Approve would read the real /dev/tty.
-	f := completions.NewFakeLLM("-$-SCRIPT-START-$-\necho hello\n-$-SCRIPT-END-$-\n")
+	f := completions.NewFakeLLM("---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
 	url, err := f.Start()
 	if err != nil {
 		t.Fatalf("cannot start fake: %v", err)
@@ -117,7 +117,7 @@ func TestRunAborted(t *testing.T) {
 func TestRunBufferedHidesSuccess(t *testing.T) {
 	// -by buffers the script review and the ENTER separator along with
 	// the script's output; a successful run produces nothing at all.
-	stdout, stderr, err := e2e(t, []string{"-y", "-b", "do something"}, "-$-SCRIPT-START-$-\necho hello\necho err >&2\n-$-SCRIPT-END-$-\n")
+	stdout, stderr, err := e2e(t, []string{"-y", "-b", "do something"}, "---SCRIPT-START---\necho hello\necho err >&2\n---SCRIPT-END---\n")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -129,7 +129,7 @@ func TestRunBufferedAloneShowsReview(t *testing.T) {
 	// -b alone: the script review and the ENTER separator go to the
 	// real stderr — the user cannot approve a script they cannot see —
 	// and only the execution output is buffered.
-	f := completions.NewFakeLLM("-$-SCRIPT-START-$-\necho hello\n-$-SCRIPT-END-$-\n")
+	f := completions.NewFakeLLM("---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
 	url, err := f.Start()
 	if err != nil {
 		t.Fatalf("cannot start fake: %v", err)
@@ -159,7 +159,7 @@ func TestRunBufferedAloneShowsReview(t *testing.T) {
 
 func TestRunBufferedShowsFailure(t *testing.T) {
 	// -b shows the captured output when the script fails.
-	stdout, stderr, err := e2e(t, []string{"-y", "-b", "do something"}, "-$-SCRIPT-START-$-\necho hello\nexit 3\n-$-SCRIPT-END-$-\n")
+	stdout, stderr, err := e2e(t, []string{"-y", "-b", "do something"}, "---SCRIPT-START---\necho hello\nexit 3\n---SCRIPT-END---\n")
 	if err == nil || !strings.Contains(err.Error(), "script failed") {
 		t.Fatalf("expected run error, got %v", err)
 	}
@@ -176,7 +176,7 @@ func TestRunNoTerminalRejects(t *testing.T) {
 	if _, err := os.Open("/dev/tty"); err == nil {
 		t.Skip("environment has a controlling terminal")
 	}
-	stdout, stderr, err := e2e(t, []string{"do something"}, "-$-SCRIPT-START-$-\necho hello\n-$-SCRIPT-END-$-\n")
+	stdout, stderr, err := e2e(t, []string{"do something"}, "---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
 	if err == nil || !strings.Contains(err.Error(), "cannot ask for approval") {
 		t.Fatalf("expected approval error, got %v", err)
 	}
@@ -189,7 +189,7 @@ func TestRunNoTerminalRejects(t *testing.T) {
 func TestRunTrace(t *testing.T) {
 	// -x threads through to the executed script: commands are traced
 	// to stderr, stdout still gets only the script's output.
-	stdout, stderr, err := e2e(t, []string{"-y", "-t", "do something"}, "-$-SCRIPT-START-$-\necho hello\n-$-SCRIPT-END-$-\n")
+	stdout, stderr, err := e2e(t, []string{"-y", "-t", "do something"}, "---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -202,7 +202,7 @@ func TestRunTrace(t *testing.T) {
 func TestRunScriptReadsStdin(t *testing.T) {
 	// Without "-", stdin is not touched by Parse and reaches the
 	// script live on fd 9 (rewired to fd 0 by the engine's group).
-	f := completions.NewFakeLLM("-$-SCRIPT-START-$-\nread a; read b; echo \"sum: $((a+b))\"\n-$-SCRIPT-END-$-\n")
+	f := completions.NewFakeLLM("---SCRIPT-START---\nread a; read b; echo \"sum: $((a+b))\"\n---SCRIPT-END---\n")
 	url, err := f.Start()
 	if err != nil {
 		t.Fatalf("cannot start fake: %v", err)
@@ -232,7 +232,7 @@ func TestRunDashDrainsStdin(t *testing.T) {
 	// With "-", Parse drains stdin to EOF into "$@"; the script
 	// sees the data as arguments, and its stdin is at EOF — a read
 	// fails honestly under -e rather than re-reading consumed data.
-	f := completions.NewFakeLLM("-$-SCRIPT-START-$-\nfor a in \"$@\"; do echo \"arg: $a\"; done\n-$-SCRIPT-END-$-\n")
+	f := completions.NewFakeLLM("---SCRIPT-START---\nfor a in \"$@\"; do echo \"arg: $a\"; done\n---SCRIPT-END---\n")
 	url, err := f.Start()
 	if err != nil {
 		t.Fatalf("cannot start fake: %v", err)
@@ -341,7 +341,7 @@ func TestRunSandboxFailsBeforeAPICall(t *testing.T) {
 	// Confinement problems must surface before the model is called: no
 	// request is sent, no script generated, nothing to review. A broken
 	// bwrap on $PATH stands in for any confinement failure.
-	f := completions.NewFakeLLM("-$-SCRIPT-START-$-\necho should-not-run\n-$-SCRIPT-END-$-\n")
+	f := completions.NewFakeLLM("---SCRIPT-START---\necho should-not-run\n---SCRIPT-END---\n")
 	url, err := f.Start()
 	if err != nil {
 		t.Fatalf("cannot start fake: %v", err)
@@ -383,7 +383,7 @@ func TestRunBusyboxFailsBeforeAPICall(t *testing.T) {
 	// A missing busybox must surface before the model is called: no
 	// request is sent, no script generated, nothing to review. An
 	// empty $PATH stands in for any environment without busybox.
-	f := completions.NewFakeLLM("-$-SCRIPT-START-$-\necho should-not-run\n-$-SCRIPT-END-$-\n")
+	f := completions.NewFakeLLM("---SCRIPT-START---\necho should-not-run\n---SCRIPT-END---\n")
 	url, err := f.Start()
 	if err != nil {
 		t.Fatalf("cannot start fake: %v", err)
@@ -416,7 +416,7 @@ func TestRunBusyboxFailsBeforeAPICall(t *testing.T) {
 func TestRunNetworkEnforcesSandbox(t *testing.T) {
 	// -n turns confinement on like -r and -w: a broken bwrap with -n
 	// fails before the model is called, proving the sandbox is on.
-	f := completions.NewFakeLLM("-$-SCRIPT-START-$-\necho should-not-run\n-$-SCRIPT-END-$-\n")
+	f := completions.NewFakeLLM("---SCRIPT-START---\necho should-not-run\n---SCRIPT-END---\n")
 	url, err := f.Start()
 	if err != nil {
 		t.Fatalf("cannot start fake: %v", err)
@@ -453,7 +453,7 @@ func TestRunNetworkEnforcesSandbox(t *testing.T) {
 
 func TestRunErrorReply(t *testing.T) {
 	// The model's ERROR reason flows through the whole cycle unchanged.
-	_, _, err := e2e(t, []string{"do something"}, "-$-ERROR-START-$-\ncannot do that\n-$-ERROR-END-$-")
+	_, _, err := e2e(t, []string{"do something"}, "---ERROR-START---\ncannot do that\n---ERROR-END---")
 	if err == nil || err.Error() != "cannot do that" {
 		t.Fatalf("expected model error, got %v", err)
 	}
@@ -462,7 +462,7 @@ func TestRunErrorReply(t *testing.T) {
 func TestRunStdinArgs(t *testing.T) {
 	// "-" injects stdin lines as arguments; the approval still works
 	// via -y since stdin is consumed.
-	f := completions.NewFakeLLM("-$-SCRIPT-START-$-\nfor a in \"$@\"; do echo \"$a\"; done\n-$-SCRIPT-END-$-\n")
+	f := completions.NewFakeLLM("---SCRIPT-START---\nfor a in \"$@\"; do echo \"$a\"; done\n---SCRIPT-END---\n")
 	url, err := f.Start()
 	if err != nil {
 		t.Fatalf("cannot start fake: %v", err)

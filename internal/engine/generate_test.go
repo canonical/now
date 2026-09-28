@@ -53,7 +53,7 @@ func generate(t *testing.T, reply string) (string, error) {
 }
 
 func TestGenerateScript(t *testing.T) {
-	script, err := generate(t, "-$-SCRIPT-START-$-\necho hello\n-$-SCRIPT-END-$-\n")
+	script, err := generate(t, "---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -63,7 +63,7 @@ func TestGenerateScript(t *testing.T) {
 func TestGenerateScriptChatterOutsideTokens(t *testing.T) {
 	// Chatter before the starting token and after the ending token is
 	// ignored.
-	script, err := generate(t, "Sure, here it is:\n-$-SCRIPT-START-$-\necho hello\n-$-SCRIPT-END-$-\nHope that helps!")
+	script, err := generate(t, "Sure, here it is:\n---SCRIPT-START---\necho hello\n---SCRIPT-END---\nHope that helps!")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -72,7 +72,7 @@ func TestGenerateScriptChatterOutsideTokens(t *testing.T) {
 
 func TestGenerateScriptFencesInsideAreContent(t *testing.T) {
 	// Code block fences inside the tokens are ordinary script content.
-	script, err := generate(t, "-$-SCRIPT-START-$-\ncat <<'EOF' >> f\nhi\nEOF\n```\necho more\n```\n-$-SCRIPT-END-$-")
+	script, err := generate(t, "---SCRIPT-START---\ncat <<'EOF' >> f\nhi\nEOF\n```\necho more\n```\n---SCRIPT-END---")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -82,15 +82,15 @@ func TestGenerateScriptFencesInsideAreContent(t *testing.T) {
 func TestGenerateTokensInsideScriptAreContent(t *testing.T) {
 	// Only the first starting token and the last ending token delimit;
 	// token-like lines in between are ordinary script content.
-	script, err := generate(t, "-$-SCRIPT-START-$-\necho '-$-SCRIPT-END-$-'\n-$-SCRIPT-END-$-")
+	script, err := generate(t, "---SCRIPT-START---\necho '---SCRIPT-END---'\n---SCRIPT-END---")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertEqual(t, "script", script, "echo '-$-SCRIPT-END-$-'")
+	assertEqual(t, "script", script, "echo '---SCRIPT-END---'")
 }
 
 func TestGenerateErrorReply(t *testing.T) {
-	_, err := generate(t, "-$-ERROR-START-$-\ncannot move a file to itself: /file/path\n-$-ERROR-END-$-")
+	_, err := generate(t, "---ERROR-START---\ncannot move a file to itself: /file/path\n---ERROR-END---")
 	if err == nil || !strings.Contains(err.Error(), "cannot move a file to itself") {
 		t.Fatalf("expected model error, got %v", err)
 	}
@@ -98,7 +98,7 @@ func TestGenerateErrorReply(t *testing.T) {
 
 func TestGenerateErrorReplyChatter(t *testing.T) {
 	// The error content is carried verbatim, chatter outside ignored.
-	_, err := generate(t, "Sorry:\n-$-ERROR-START-$-\nrequired command 'python3' is not builtin (see -c)\n-$-ERROR-END-$-\nGood luck!")
+	_, err := generate(t, "Sorry:\n---ERROR-START---\nrequired command 'python3' is not builtin (see -c)\n---ERROR-END---\nGood luck!")
 	if err == nil || !strings.Contains(err.Error(), "required command 'python3' is not builtin") {
 		t.Fatalf("expected model error, got %v", err)
 	}
@@ -106,7 +106,7 @@ func TestGenerateErrorReplyChatter(t *testing.T) {
 
 func TestGenerateScriptPreferredOverError(t *testing.T) {
 	// When both tokens appear, the first one in the reply wins.
-	script, err := generate(t, "-$-SCRIPT-START-$-\necho hello\n-$-SCRIPT-END-$-\n-$-ERROR-START-$-\nnope\n-$-ERROR-END-$-")
+	script, err := generate(t, "---SCRIPT-START---\necho hello\n---SCRIPT-END---\n---ERROR-START---\nnope\n---ERROR-END---")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -114,7 +114,7 @@ func TestGenerateScriptPreferredOverError(t *testing.T) {
 }
 
 func TestGenerateEmptyScript(t *testing.T) {
-	_, err := generate(t, "-$-SCRIPT-START-$-\n-$-SCRIPT-END-$-")
+	_, err := generate(t, "---SCRIPT-START---\n---SCRIPT-END---")
 	if err == nil || !strings.Contains(err.Error(), "empty script") {
 		t.Fatalf("expected empty script error, got %v", err)
 	}
@@ -122,7 +122,7 @@ func TestGenerateEmptyScript(t *testing.T) {
 
 func TestGenerateMissingEndToken(t *testing.T) {
 	// A starting token without its ending counterpart is an error.
-	_, err := generate(t, "-$-SCRIPT-START-$-\necho hello\n")
+	_, err := generate(t, "---SCRIPT-START---\necho hello\n")
 	if err == nil || !strings.Contains(err.Error(), "unexpected model output") {
 		t.Fatalf("expected unexpected-output error, got %v", err)
 	}

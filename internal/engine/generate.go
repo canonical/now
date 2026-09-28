@@ -57,18 +57,23 @@ func Generate(ctx context.Context, opts GenerateOptions) (string, error) {
 // parseReply extracts the script or the failure reason from a model
 // reply, which must be delimited by explicit tokens:
 //
-//	-$-SCRIPT-START-$- ... -$-SCRIPT-END-$- carries the script.
-//	-$-ERROR-START-$- ... -$-ERROR-END-$- carries the failure.
+//	---SCRIPT-START--- ... ---SCRIPT-END--- carries the script.
+//	---ERROR-START--- ... ---ERROR-END--- carries the failure.
+//
+// The markers are plain literal lines, not markdown fences: smaller
+// models respect a single unadorned delimiter line far more reliably
+// than nested or decorated delimiters. See the systemPrompt const in
+// internal/prompt for the model-facing side of this contract.
 //
 // The first starting token in the reply selects the kind; the content
 // is everything between it and the last matching ending token, with
 // chatter outside the tokens ignored. Any other case is an error.
 func parseReply(reply string) (string, error) {
 	const (
-		scriptStart = "-$-SCRIPT-START-$-"
-		scriptEnd   = "-$-SCRIPT-END-$-"
-		errorStart  = "-$-ERROR-START-$-"
-		errorEnd    = "-$-ERROR-END-$-"
+		scriptStart = "---SCRIPT-START---"
+		scriptEnd   = "---SCRIPT-END---"
+		errorStart  = "---ERROR-START---"
+		errorEnd    = "---ERROR-END---"
 	)
 
 	si, ei := strings.Index(reply, scriptStart), strings.Index(reply, errorStart)
