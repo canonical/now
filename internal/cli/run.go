@@ -58,7 +58,7 @@ const sampleScript = `
 # CONFIGURATION IS MISSING: This script creates a sample at $HOME/.now
 
 cat > "$1" <<'END'
-#api-url=http://128.0.0.1:11434
+#api-url=http://127.0.0.1:11434
 #api-key=
 #api-model=local
 #api-type=completions-v1

@@ -282,9 +282,16 @@ func TestRunSampleConfigOffer(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read sample: %v", err)
 	}
-	if !strings.Contains(string(data), "#api-url=") {
-		t.Errorf("unexpected sample content: %q", data)
-	}
+	// Pin the entire sample content. The sample is a contract: every
+	// key is a commented placeholder, so an unedited sample fails
+	// loading with the honest missing-key error. Changing it here is
+	// deliberate, not accidental.
+	wantContent := "" +
+		"#api-url=http://127.0.0.1:11434\n" +
+		"#api-key=\n" +
+		"#api-model=local\n" +
+		"#api-type=completions-v1\n"
+	assertEqual(t, "sample content", string(data), wantContent)
 	if !strings.Contains(stderr.String(), "adjust as necessary") {
 		t.Errorf("sample script not shown for review: %q", stderr.String())
 	}
