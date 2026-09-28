@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/niemeyer/now/internal/busybox"
-	"github.com/niemeyer/now/internal/prompt"
+	"github.com/canonical/now/internal/busybox"
+	"github.com/canonical/now/internal/prompt"
 )
 
 // GenerateOptions carries the inputs for script generation.

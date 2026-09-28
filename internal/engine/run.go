@@ -11,9 +11,9 @@ import (
 	"os/exec"
 	"strings"
 
-	"github.com/niemeyer/now/internal/busybox"
-	"github.com/niemeyer/now/internal/prompt"
-	"github.com/niemeyer/now/internal/sandbox"
+	"github.com/canonical/now/internal/busybox"
+	"github.com/canonical/now/internal/prompt"
+	"github.com/canonical/now/internal/sandbox"
 )
 
 // RunOptions carries the inputs for script execution.

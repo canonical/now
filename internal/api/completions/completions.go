@@ -14,8 +14,8 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/niemeyer/now/internal/prompt"
-	"github.com/niemeyer/now/internal/setup"
+	"github.com/canonical/now/internal/prompt"
+	"github.com/canonical/now/internal/setup"
 )
 
 // request is the body sent to /v1/chat/completions.

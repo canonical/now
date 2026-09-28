@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/niemeyer/now/internal/prompt"
+	"github.com/canonical/now/internal/prompt"
 )
 
 func assertEqual[T any](t *testing.T, label string, got, want T) {

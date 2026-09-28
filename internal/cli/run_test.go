@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/niemeyer/now/internal/api/completions"
-	"github.com/niemeyer/now/internal/cli"
+	"github.com/canonical/now/internal/api/completions"
+	"github.com/canonical/now/internal/cli"
 )
 
 // e2e starts a fake API replying with the given script, writes a setup

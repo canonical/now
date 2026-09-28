@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/niemeyer/now/internal/cli"
-	"github.com/niemeyer/now/internal/prompt"
+	"github.com/canonical/now/internal/cli"
+	"github.com/canonical/now/internal/prompt"
 )
 
 // assertEqual fails the test when got and want are not deeply equal.

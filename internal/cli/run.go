@@ -14,12 +14,12 @@ import (
 	"os"
 	"os/signal"
 
-	"github.com/niemeyer/now/internal/api/completions"
-	"github.com/niemeyer/now/internal/busybox"
-	"github.com/niemeyer/now/internal/engine"
-	"github.com/niemeyer/now/internal/prompt"
-	"github.com/niemeyer/now/internal/sandbox"
-	"github.com/niemeyer/now/internal/setup"
+	"github.com/canonical/now/internal/api/completions"
+	"github.com/canonical/now/internal/busybox"
+	"github.com/canonical/now/internal/engine"
+	"github.com/canonical/now/internal/prompt"
+	"github.com/canonical/now/internal/sandbox"
+	"github.com/canonical/now/internal/setup"
 )
 
 // RunOptions carries the inputs for the full cycle.

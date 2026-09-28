@@ -13,7 +13,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/niemeyer/now/internal/sandbox"
+	"github.com/canonical/now/internal/sandbox"
 )
 
 func assertEqual[T any](t *testing.T, label string, got, want T) {

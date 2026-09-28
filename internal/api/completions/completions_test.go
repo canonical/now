@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/niemeyer/now/internal/api/completions"
-	"github.com/niemeyer/now/internal/prompt"
-	"github.com/niemeyer/now/internal/setup"
+	"github.com/canonical/now/internal/api/completions"
+	"github.com/canonical/now/internal/prompt"
+	"github.com/canonical/now/internal/setup"
 )
 
 func clientOpts(url string) setup.Options {

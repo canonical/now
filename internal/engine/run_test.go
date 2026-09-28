@@ -12,9 +12,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/niemeyer/now/internal/busybox"
-	"github.com/niemeyer/now/internal/engine"
-	"github.com/niemeyer/now/internal/prompt"
+	"github.com/canonical/now/internal/busybox"
+	"github.com/canonical/now/internal/engine"
+	"github.com/canonical/now/internal/prompt"
 )
 
 // mustBusybox probes busybox for the test.

@@ -11,7 +11,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/niemeyer/now/internal/setup"
+	"github.com/canonical/now/internal/setup"
 )
 
 func assertEqual[T any](t *testing.T, label string, got, want T) {

@@ -14,7 +14,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/niemeyer/now/internal/prompt"
+	"github.com/canonical/now/internal/prompt"
 )
 
 // Options is the parsed form of the command line.

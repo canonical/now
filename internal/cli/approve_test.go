@@ -10,7 +10,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/niemeyer/now/internal/cli"
+	"github.com/canonical/now/internal/cli"
 )
 
 func approve(t *testing.T, opts cli.ApprovalOptions) (bool, string) {

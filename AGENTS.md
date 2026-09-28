@@ -1,6 +1,6 @@
 # Preface
 
-**now** is a stdlib-only Go CLI (module `github.com/niemeyer/now`) that
+**now** is a stdlib-only Go CLI (module `github.com/canonical/now`) that
 sends a natural-language request to an OpenAI-compatible API, generates
 a one-shot shell script, shows it for approval, and runs it under
 busybox — optionally confined with bwrap. If your task touches any of

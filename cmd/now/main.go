@@ -12,7 +12,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/niemeyer/now/internal/cli"
+	"github.com/canonical/now/internal/cli"
 )
 
 func main() {

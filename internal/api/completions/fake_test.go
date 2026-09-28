@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/niemeyer/now/internal/api/completions"
+	"github.com/canonical/now/internal/api/completions"
 )
 
 func assertEqual[T any](t *testing.T, label string, got, want T) {

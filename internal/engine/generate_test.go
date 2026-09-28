@@ -10,10 +10,10 @@ import (
 	"testing"
 
 	"context"
-	"github.com/niemeyer/now/internal/api/completions"
-	"github.com/niemeyer/now/internal/engine"
-	"github.com/niemeyer/now/internal/prompt"
-	"github.com/niemeyer/now/internal/setup"
+	"github.com/canonical/now/internal/api/completions"
+	"github.com/canonical/now/internal/engine"
+	"github.com/canonical/now/internal/prompt"
+	"github.com/canonical/now/internal/setup"
 )
 
 func assertEqual[T any](t *testing.T, label string, got, want T) {
