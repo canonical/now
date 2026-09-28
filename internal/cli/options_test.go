@@ -147,6 +147,20 @@ func TestParseUnknownCommand(t *testing.T) {
 	}
 }
 
+func TestParseCommandHelpForAgent(t *testing.T) {
+	// findCommand sets HELP_FOR_AGENT=1 when calling --help, so a
+	// command can tailor its output for automated consumption.
+	dir := t.TempDir()
+	script := "#!/bin/sh\n[ \"$HELP_FOR_AGENT\" = 1 ] && echo \"AGENT\" || echo \"HUMAN\"\n"
+	if err := os.WriteFile(filepath.Join(dir, "agentutil"), []byte(script), 0o755); err != nil {
+		t.Fatalf("cannot write command: %v", err)
+	}
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	opts := mustParse(t, []string{"-c", "agentutil", "q", "a.txt"})
+	assertEqual(t, "Help", opts.Commands[0].Help, "AGENT\n")
+}
+
 func TestParseRequestOnly(t *testing.T) {
 	// Paths are optional; a request alone is valid.
 	opts := mustParse(t, []string{"just generate something"})

@@ -324,13 +324,17 @@ func addCommands(opts *Options, list string) error {
 
 // findCommand resolves name in $PATH and captures its --help output. A
 // command that does not support --help is still accepted; it just carries
-// no help for the prompt.
+// no help for the prompt. HELP_FOR_AGENT=1 is set in the child environment
+// so a command that wants to tailor its --help output for automated use
+// (e.g. a terser format, or a machine-readable summary) can detect it.
 func findCommand(name string) (prompt.Command, error) {
 	path, err := exec.LookPath(name)
 	if err != nil {
 		return prompt.Command{}, parseErrf("cannot find command %q in $PATH", name)
 	}
-	out, err := exec.Command(path, "--help").Output()
+	cmd := exec.Command(path, "--help")
+	cmd.Env = append(os.Environ(), "HELP_FOR_AGENT=1")
+	out, err := cmd.Output()
 	if err != nil {
 		return prompt.Command{Name: name, Path: path}, nil
 	}
