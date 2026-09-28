@@ -199,6 +199,65 @@ func TestRunTrace(t *testing.T) {
 	}
 }
 
+func TestRunScriptReadsStdin(t *testing.T) {
+	// Without "-", stdin is not touched by Parse and reaches the
+	// script live on fd 9 (rewired to fd 0 by the engine's group).
+	f := completions.NewFakeLLM("-$-SCRIPT-START-$-\nread a; read b; echo \"sum: $((a+b))\"\n-$-SCRIPT-END-$-\n")
+	url, err := f.Start()
+	if err != nil {
+		t.Fatalf("cannot start fake: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Stop() })
+
+	setupPath := filepath.Join(t.TempDir(), ".now")
+	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\napi-model=test\n"), 0o600); err != nil {
+		t.Fatalf("cannot write setup: %v", err)
+	}
+
+	var stdout, stderr strings.Builder
+	err = cli.Run(context.Background(), cli.RunOptions{
+		Argv:      []string{"-y", "sum the stdin numbers"},
+		Stdin:     strings.NewReader("3\n4\n"),
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		SetupPath: setupPath,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", stdout.String(), "sum: 7\n")
+}
+
+func TestRunDashDrainsStdin(t *testing.T) {
+	// With "-", Parse drains stdin to EOF into "$@"; the script
+	// sees the data as arguments, and its stdin is at EOF — a read
+	// fails honestly under -e rather than re-reading consumed data.
+	f := completions.NewFakeLLM("-$-SCRIPT-START-$-\nfor a in \"$@\"; do echo \"arg: $a\"; done\n-$-SCRIPT-END-$-\n")
+	url, err := f.Start()
+	if err != nil {
+		t.Fatalf("cannot start fake: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Stop() })
+
+	setupPath := filepath.Join(t.TempDir(), ".now")
+	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\napi-model=test\n"), 0o600); err != nil {
+		t.Fatalf("cannot write setup: %v", err)
+	}
+
+	var stdout, stderr strings.Builder
+	err = cli.Run(context.Background(), cli.RunOptions{
+		Argv:      []string{"-y", "echo the args", "-"},
+		Stdin:     strings.NewReader("one\ntwo\n"),
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		SetupPath: setupPath,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", stdout.String(), "arg: one\narg: two\n")
+}
+
 func TestRunSampleConfigOffer(t *testing.T) {
 	// A missing configuration with a human reviewing scripts offers the
 	// sample script through the normal approval cycle; on approval the

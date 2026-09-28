@@ -11,7 +11,16 @@ AI for sensitive terminal environments in a classic way.
 - [Busybox and arbitrary commands](#busybox-and-arbitrary-commands)
 - [Security and safety](#security-and-safety)
 - [Sandboxing and isolation](#sandboxing-and-isolation)
-- [Further examples](#further-examples)
+- [Examples](#examples)
+  - [Classic greeting](#classic-greeting)
+  - [Tracing, quietly, on errors](#tracing-quietly-on-errors)
+  - [One question, three data sources](#one-question-three-data-sources)
+  - [Explicit argument labels](#explicit-argument-labels)
+  - [Implicit arguments](#implicit-arguments)
+  - [Implicit desired outcome](#implicit-desired-outcome)
+  - [Interactive scripts](#interactive-scripts)
+  - [Python scripts on-the-fly](#python-scripts-on-the-fly)
+  - [External JavaScript API](#external-javascript-api)
 - [License](#license)
 
 ## Overview
@@ -117,7 +126,7 @@ The key to the success when using _now_ is realizing that arguments have no expl
 define it, and most often the model can tell what you mean with no further help. 
 
 
-## Busybox and arbitrary commands
+## Busybox and external commands
 
 The _busybox_ project was chosen as the execution environment because it's a battle tested, compact, fast, and rich environment
 where most important commands are supported without even executing an external process. Being mostly standalone also
@@ -126,7 +135,7 @@ facilitates the sandboxing features described in the respective section.
 With that said, _now_ can actually work with any external command that is in the `$PATH` and supports the
 ubiquitous `--help` convention.
 
-Here is an example:
+Here is a simple example:
 
 ```
 $ cat download.sh
@@ -145,6 +154,8 @@ download.sh --source="$1" --output="$2"
 As expected given the state of modern models, the hints available are enough for it to imply the task and 
 assign the arguments properly.
 
+Commands supporting more complex APIs may choose to differentiate their output by checking if `$HELP_FOR_AGENT`
+is set to `1` when processing the `--help` argument. See [external JavaScript API](#external-javascript-api) in the examples.
 
 ## Security and safety
 
@@ -231,7 +242,7 @@ error: script failed: exit status 1
 ```
 
 
-## Further examples
+## Examples
 
 All of these examples were generated on a local _Qwen 3.8 27B Q4_ model running on _llama.cpp_.
 
@@ -257,21 +268,40 @@ error: script failed: exit status 1
 
 ### One question, three data sources
 
+Path from internal model knowledge:
 ```
 $ now "how many users have bash as a shell?"
 awk -F: '$7=="/bin/bash"' /etc/passwd | wc -l
 [ ENTER | CTRL-C ]
+```
 
+Path from stdin:
+```
 $ cat /etc/passwd | now "how many users have bash as a shell?" -
 printf '%s\n' "$@" | grep -c ':/bin/bash$'
 [ ENTER | CTRL-C ]
+```
 
+Path from argument:
+```
 $ now "how many users have bash as a shell?" /chroot/passwd
 awk -F: '$7 ~ /bash/' /chroot/passwd | wc -l
 [ ENTER | CTRL-C ]
 ```
 
-### Inferring the meaning of arguments
+### Explicit argument labels
+
+```
+$ echo file1 file2 | now "cp the [foo] files to the [bar] dirs" [foo] - [bar] /one /two
+for f in file1 file2; do
+  for d in /one /two; do
+    cp "$f" "$d/"
+  done
+done
+[ ENTER | CTRL-C ]
+```
+
+### Implicit arguments
 
 ```
 $ now "download the file" https://example.com/index.html test.html
@@ -279,7 +309,7 @@ wget -O test.html https://example.com/index.html
 [ ENTER | CTRL-C ]
 ```
 
-### Inferring the desired outcome
+### Implicit desired outcome
 
 ```
 $ touch foo/1.txt foo/2.txt bar/three.txt bar/four.txt
@@ -289,7 +319,25 @@ mv bar/three.txt bar/3.txt
 [ ENTER | CTRL-C ]
 ```
 
-### Python on-the-fly
+### Interactive scripts
+
+Scripts have access to stdin as well, as long as `-` isn't used as an argument to input request data.
+
+```
+$ now -c python3 "in a loop, ask for a line, run it on python, repeat"
+while true; do
+  printf '>>> '
+  read line || break
+  [ -z "$line" ] && break
+  python3 -c "$line"
+done
+[ ENTER | CTRL-C ]
+
+>>> print("hi")
+hi
+```
+
+### Python scripts on-the-fly
 
 ```
 $ echo 9 | python3 -c "$(now 'print a py program that prints the sqrt of the number from stdin')"
@@ -309,6 +357,33 @@ $ echo 9 | python3 -c "$(now -q 'print a py program that prints the sqrt of the 
 3.0
 ```
 
+### Custom external commands
+
+```
+$ cat download.sh
+#!/bin/sh
+[ "$1" = "--help" ] && echo "Usage: download.sh --output=<file> --source=<url>"
+
+$ now -c download.sh "fetch the file" http://sample.com/foo.txt bar.txt
+download.sh --source="$1" --output="$2"
+[ ENTER | CTRL-C ]
+```
+
+### External JavaScript API
+
+The app is in development so the model has no way of knowing it yet, but the tool
+is documenting its own API via `--help` and `$HELP_FOR_AGENT`.
+
+```
+$ now -c anystore "books count by year" books.db
+anystore books.db 'db.books.aggregate([{"$group":{"_id":"$year","count":{"$sum":1}}},{"$sort":{"_id":1}}])'
+[ ENTER | CTRL-C ]
+
+{"id":1965,"count":1}
+{"id":1984,"count":1}
+{"id":1937,"count":1}
+...
+```
 
 ## License
 

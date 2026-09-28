@@ -19,6 +19,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 
@@ -31,6 +32,9 @@ import (
 type RunOptions struct {
 	// Args are delivered to the script in "$@".
 	Args []string
+	// Stdin is the stream the script observes on fd 0. nil gives
+	// the script an empty stream (EOF on read).
+	Stdin io.Reader
 	// Stdout and Stderr receive the script output.
 	Stdout io.Writer
 	Stderr io.Writer
@@ -61,9 +65,20 @@ func Run(ctx context.Context, script string, opts RunOptions) error {
 		return fmt.Errorf("cannot run script: busybox not probed")
 	}
 
-	var stdin strings.Builder
-	stdin.WriteString(aliasPrelude(opts.Commands))
-	stdin.WriteString(script)
+	// The script travels on stdin (sh -s) — no temp files, no
+	// artifacts — wrapped in a group whose redirection attaches
+	// fd 9, the user's stdin, as the script's fd 0. fd 9 is the
+	// highest single-digit descriptor, so the redirection works in
+	// any POSIX shell while leaving fds 3-8 free for the script's
+	// own use. The brackets add safety: ash parses the whole
+	// compound statement before executing any of it, so once
+	// fd 0 is swapped the shell never falls back to reading user
+	// data as script source. A bare "exec 0<&9" line would invite
+	// exactly that, and actually breaks tests. Aliases are expanded
+	// at parse time, so the prelude must run before the group is
+	// parsed: put it first, then the group.
+	aliases := aliasPrelude(opts.Commands)
+	script = aliases + "{\n" + script + "\n} <&9 9<&-\n";
 
 	// -e aborts on the first failing command, so a half-executed
 	// script never reads as success.
@@ -79,6 +94,21 @@ func Run(ctx context.Context, script string, opts RunOptions) error {
 		shellArgs = append(shellArgs, opts.Args...)
 	}
 
+	// opts.Stdin must be an *os.File to ride as fd 9 (ExtraFiles
+	// carries only *os.File).
+	stdin, cleanup, err := stdinFile(opts.Stdin)
+	if err != nil {
+		return err
+	}
+	defer cleanup()
+
+	// ExtraFiles numbers entries from fd 3, so six nil placeholders
+	// leave fds 3-8 unopened for the script and land the user's
+	// stream on fd 9.
+	extras := []*os.File{nil, nil, nil, nil, nil, nil, stdin}
+
+	var cmdPath string
+	var cmdArgs []string
 	if opts.SandboxOn {
 		// Probing already happened in the caller, before generating
 		// the script; the grants arrive ready.
@@ -86,25 +116,50 @@ func Run(ctx context.Context, script string, opts RunOptions) error {
 		if err != nil {
 			return err
 		}
-		cmd := exec.CommandContext(ctx, bargs[0], bargs[1:]...)
-		cmd.Stdin = strings.NewReader(stdin.String())
-		cmd.Stdout = opts.Stdout
-		cmd.Stderr = opts.Stderr
-		if err := cmd.Run(); err != nil {
-			// The script ran and failed — distinct from not running at all.
-			return fmt.Errorf("script failed: %w", err)
-		}
-		return nil
+		cmdPath = bargs[0]
+		cmdArgs = bargs[1:]
+	} else {
+		cmdPath = busybox
+		cmdArgs = shellArgs
 	}
 
-	cmd := exec.CommandContext(ctx, busybox, shellArgs...)
-	cmd.Stdin = strings.NewReader(stdin.String())
+	cmd := exec.CommandContext(ctx, cmdPath, cmdArgs...)
+	cmd.Stdin = strings.NewReader(script)
 	cmd.Stdout = opts.Stdout
 	cmd.Stderr = opts.Stderr
+	cmd.ExtraFiles = extras
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("script failed: %w", err)
 	}
 	return nil
+}
+
+// stdinFile turns r into the *os.File that carries the user's stdin
+// as fd 9. A nil becomes an empty stream, so a script read hits
+// honest EOF. A non-file reader is copied into a pipe by a goroutine
+// that ends when cleanup closes the write side.
+func stdinFile(r io.Reader) (f *os.File, cleanup func(), err error) {
+	if f, ok := r.(*os.File); ok {
+		return f, func() {}, nil
+	}
+	pr, pw, err := os.Pipe()
+	if err != nil {
+		return nil, nil, fmt.Errorf("cannot bridge stdin: %w", err)
+	}
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		if r != nil {
+			_, _ = io.Copy(pw, r)
+		}
+		_ = pw.Close()
+	}()
+	cleanup = func() {
+		_ = pw.Close()
+		<-done
+		_ = pr.Close()
+	}
+	return pr, cleanup, nil
 }
 
 // aliasPrelude returns shell lines aliasing every allowed command to its

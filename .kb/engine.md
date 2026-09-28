@@ -119,15 +119,48 @@ them as one problem.
 
 ## Execution mechanics
 
-- The script is fed on **stdin** (`busybox sh -t? -s`) — no temp
-  files, no artifacts — and `opts.Args` are delivered as `"$@"`.
-  A `--` separator precedes the arguments when any exist: without it,
-  busybox parses everything after `-s` as shell options, so an
-  argument starting with `-` (say `-r foo`) kills the script with
-  `sh: illegal option -r` before it runs.
-- `exec.CommandContext` throughout, so a canceled context (CTRL-C via
-  the CLI's `signal.NotifyContext`) kills the process tree, including
-  under bwrap.
+- The script travels on **stdin** (`busybox sh -t? -e -s`) — no
+  temp files, no artifacts — and `opts.Args` are delivered as
+  `"$@"`. A `--` separator precedes the arguments when any exist:
+  without it, busybox parses everything after `-s` as shell options,
+  so an argument starting with `-` (say `-r foo`) kills the script
+  with `sh: illegal option -r` before it runs.
+- fd 0 belongs to the script source; the user's stdin — the data a
+  script may read — rides on **fd 9**. `Run` wraps the script in a
+  group ending `} <&9 9<&-`, which attaches the user's stream as
+  the script's fd 0 and closes the spare descriptor, so a script
+  that reads (`read`, `python3 -`, `curl` bodies) receives the
+  user's data, never its own source. The CLI tees the user's stdin
+  through parsing (`cli.Run`), so data consumed by the `-`
+  placeholder is nonetheless delivered to the script.
+- fd 9 is the highest single-digit descriptor: the redirection
+  works in any POSIX shell (multi-digit forms like `<&63` are an
+  extension busybox ash supports but POSIX does not require), and
+  everything below — fds 3-8 — stays free for the script's own
+  `exec 3<...` style usage. `exec.Cmd.ExtraFiles` numbers entries
+  from fd 3, so `Run` pads with six nil placeholders to land the
+  stream on 9; the ceiling for any such scheme is the soft
+  `RLIMIT_NOFILE`.
+- The wrapping group is required rather than stylistic: ash parses
+  a compound statement completely before executing any of it, so
+  the fd 0 swap takes effect only after the entire script has been
+  parsed, and the shell can never fall back to reading user data as
+  script source. A bare `exec 0<&9` prelude has no such guarantee —
+  the shell reads the script from fd 0 in buffered chunks, and once
+  its buffer drains past the swap it would parse the user's data as
+  commands.
+- Overloading fd 0 to mean both script and data is the trap this
+  split exists to avoid: a `read` would consume the script's own
+  remaining source, or hit EOF and fail under `-e`.
+- Non-file readers (test fakes, `strings.Reader`) are bridged
+  through an `os.Pipe` by a copier goroutine so fd 9 is always a
+  real descriptor — `exec.Cmd.ExtraFiles` carries only `*os.File`.
+  A nil stdin becomes `/dev/null`, so a script read gets honest
+  EOF.
+- `exec.CommandContext` throughout, so a canceled context (CTRL-C
+  via the CLI's `signal.NotifyContext`) kills the process tree,
+  including under bwrap, which inherits extra descriptors with no
+  special flag.
 - `RunOptions.Stdout`/`Stderr` are the script's own streams; the
   engine never writes prompts or review text to them (that is the
   CLI's business, on different writers).

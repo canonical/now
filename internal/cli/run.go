@@ -78,6 +78,10 @@ func Run(ctx context.Context, opts RunOptions) error {
 	ctx, stop := signal.NotifyContext(ctx, os.Interrupt)
 	defer stop()
 
+	// Parse drains stdin to EOF when "-" is used, leaving opts.Stdin
+	// at EOF for the script. The data is in "$@", not on stdin. When
+	// "-" is absent, Parse never touches stdin and the script gets the
+	// live stream. Passing opts.Stdin to both handles the either-or.
 	parsed, err := Parse(opts.Argv, opts.Stdin)
 	if err != nil {
 		var help *HelpRequested
@@ -203,6 +207,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 
 	err = engine.Run(ctx, script, engine.RunOptions{
 		Args:      args,
+		Stdin:     opts.Stdin,
 		Stdout:    stdout,
 		Stderr:    stderr,
 		Trace:     parsed.Trace,
