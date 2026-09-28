@@ -312,5 +312,5 @@ $ echo 9 | python3 -c "$(now -q 'print a py program that prints the sqrt of the 
 
 ## License
 
-The _now_ project is made available under the terms of the MIT license,
-with the copyright held by Canonical Inc. See the `LICENSE` file for details.
+The _now_ project is made available under the terms of the Apache 2.0 license.
+See the `LICENSE` file for details.
