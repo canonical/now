@@ -121,7 +121,7 @@ define it, and most often the model can tell what you mean with no further help.
 
 The _busybox_ project was chosen as the execution environment because it's a battle tested, compact, fast, and rich environment
 where most important commands are supported without even executing an external process. Being mostly standalone also
-facilitates the additional _bwrap_ sandboxing features.
+facilitates the sandboxing features described in the respective section.
 
 With that said, _now_ can actually work with any external command that is in the `$PATH` and supports the
 ubiquitous `--help` convention.
@@ -141,6 +141,9 @@ $ now -c download.sh "fetch the file" http://sample.com/foo.txt bar.txt
 download.sh --source="$1" --output="$2"
 [ ENTER | CTRL-C ]
 ```
+
+As expected given the state of modern models, the hints available are enough for it to imply the task and 
+assign the arguments properly.
 
 
 ## Security and safety
@@ -181,7 +184,7 @@ The section above covers security and safety from an architectural standpoint: t
 the review and approval process. Even then, there are times when this might not be enough; for example, when the complexity
 of the requested task and the script is too large and boring to review in detail, or because _now_ is being used unattended.
 For these cases, _now_ supports stronger sandboxing and isolation so that the generated scripts cannot get outside of the
-boundaries defined. This support is available as long as Bubblewrap's _bwrap_ is available on the $PATH and the running
+boundaries defined. This support is available as long as Bubblewrap's _bwrap_ is available on the `$PATH` and the running
 system's constraints do not get in the way.
 
 Here is an overview of the relevant parameters:
