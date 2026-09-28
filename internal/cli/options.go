@@ -202,7 +202,10 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 	for i < len(argv) {
 		arg := argv[i]
 		switch {
-		case arg == "--help":
+		case arg == "-h" || arg == "--help":
+			// -h and --help are intentionally NOT listed in the usage
+			// text above. They are kept as quiet conveniences; do not
+			// add them to the documented options.
 			return nil, &HelpRequested{}
 		// -r, -w, and -c stay plain and separate: -w implies read too,
 		// and we do not want to take over -x, as it may come some day
@@ -334,7 +337,9 @@ func findCommand(name string) (prompt.Command, error) {
 	return prompt.Command{Name: name, Path: path, Help: string(out)}, nil
 }
 
-// HelpRequested is returned when -h or --help is given.
+// HelpRequested is returned when -h or --help is given. Both forms are
+// intentionally undocumented in the usage text; do not add them to the
+// documented options.
 type HelpRequested struct{}
 
 func (*HelpRequested) Error() string { return usage }

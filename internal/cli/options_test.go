@@ -356,6 +356,15 @@ func TestParseHelp(t *testing.T) {
 	}
 }
 
+func TestParseHelpShort(t *testing.T) {
+	// -h is an undocumented alias for --help (see options.go).
+	_, err := cli.Parse([]string{"-h"}, strings.NewReader(""))
+	var hr *cli.HelpRequested
+	if !errors.As(err, &hr) {
+		t.Errorf("cli.Parse(-h): expected cli.HelpRequested, got %v", err)
+	}
+}
+
 func TestColonArgumentsArePaths(t *testing.T) {
 	// With no set syntax, colon-containing arguments are ordinary paths.
 	opts := mustParse(t, []string{"q", "9:", "b.txt", "1: foo/a.txt", "1::", "0:", "10:"})
