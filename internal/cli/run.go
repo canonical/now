@@ -98,6 +98,28 @@ func Run(ctx context.Context, opts RunOptions) error {
 	} else {
 		setupOpts, err = setup.LoadFrom(opts.SetupPath)
 	}
+
+	// Write mode (-f or -o): generate a script or formatted content and
+	// write it out. There is no approval and no execution, so the
+	// run-control and confinement flags are rejected by the parser and
+	// busybox/sandbox probing is skipped accordingly. A missing
+	// configuration cannot be recovered by proposing a sample script
+	// (that script would have to run, and write mode never runs), so
+	// the error surfaces directly.
+	if parsed.Format != "" {
+		if err != nil {
+			return err
+		}
+		return writeOutput(ctx, writeOptions{
+			parsed:    parsed,
+			setupOpts: setupOpts,
+			stdout:    opts.Stdout,
+			complete: func(ctx context.Context, messages []prompt.Message) (string, error) {
+				return completions.Complete(ctx, *setupOpts, messages)
+			},
+		})
+	}
+
 	proposeSample := false
 	if errors.Is(err, fs.ErrNotExist) && !parsed.Yes && !parsed.Quiet {
 		// The configuration is missing and the resulting script will be
@@ -220,4 +242,57 @@ func Run(ctx context.Context, opts RunOptions) error {
 		buffer.WriteTo(opts.Stderr)
 	}
 	return err
+}
+
+// writeOptions carries the inputs for the write-mode cycle.
+type writeOptions struct {
+	parsed    *Options
+	setupOpts *setup.Options
+	stdout    io.Writer
+	complete  func(ctx context.Context, messages []prompt.Message) (string, error)
+}
+
+// writeOutput generates a script (-f sh) or formatted content (any
+// other -f) and writes it to the selected destination. Nothing is
+// approved or executed. The "sh" path reuses the script prompt and so
+// still probes busybox for its applets; other formats skip busybox
+// entirely, since the model produces content rather than a runnable
+// script. A trailing newline is always appended: formatted content
+// tends to embed newlines, and a final newline is expected there.
+func writeOutput(ctx context.Context, w writeOptions) error {
+	parsed := w.parsed
+
+	var busyOpts busybox.Options
+	if parsed.Format == "sh" {
+		// The script prompt lists the busybox applets as the command
+		// surface, so busybox must be resolved before the model call.
+		var err error
+		busyOpts, err = busybox.Probe(busybox.Options{})
+		if err != nil {
+			return err
+		}
+	}
+
+	content, err := engine.Generate(ctx, engine.GenerateOptions{
+		Request:  parsed.Request,
+		Args:     parsed.Args,
+		Commands: parsed.Commands,
+		Busybox:  busyOpts,
+		Format:   parsed.Format,
+		Output:   true,
+		Complete: w.complete,
+	})
+	if err != nil {
+		return err
+	}
+	content += "\n"
+
+	if parsed.Output == "" {
+		_, err := io.WriteString(w.stdout, content)
+		return err
+	}
+	if err := os.WriteFile(parsed.Output, []byte(content), 0o644); err != nil {
+		return fmt.Errorf("cannot write output: %w", err)
+	}
+	return nil
 }

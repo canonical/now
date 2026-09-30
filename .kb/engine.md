@@ -46,6 +46,21 @@ simply not calling `Run`.
   (`cannot perform the request: <reason>`); transport failures pass
   through unchanged. The end-to-end test asserts the *complete* error
   string so the model's reason survives the whole pipeline verbatim.
+- **`GenerateOptions.Format` selects the reply protocol.** Empty or
+  `"sh"` is script mode (the SCRIPT/ERROR tags); any other value is
+  output mode (the OUTPUT/ERROR tags, see `.kb/prompt.md`). The field
+  threads through `prompt.Build` and into `parseReply`, which is
+  mode-aware: a SCRIPT tag in output mode (or an OUTPUT tag in script
+  mode) is unexpected output, not a success, so the two contracts stay
+  distinct rather than one parser accepting all markers leniently.
+- **`GenerateOptions.Output` selects the arg framing for scripts.**
+  It is meaningful only in script mode (Format empty or `"sh"`): when
+  false the prompt frames args as `"$@"` with `$1`/`$2` indexing (the
+  script will execute and read them there); when true the prompt
+  frames args as plain `## DATA` (the script is dumped, never runs, so
+  `"$@"` is meaningless). Format mode ignores it. The field threads to
+  `prompt.BuildOptions.Output`; see `.kb/prompt.md`. `parseReply` does
+  not branch on it — the reply protocol is chosen by `Format` alone.
 
 
 # Architecture
@@ -53,8 +68,9 @@ simply not calling `Run`.
 ## The reply parser (parseReply)
 
 The model is instructed (see `.kb/prompt.md`) to answer with a SCRIPT
-or ERROR tag. Real models add chatter and markdown fences; the parser
-tolerates them under rules that took several iterations to settle:
+or ERROR tag (script mode) or an OUTPUT or ERROR tag (output mode).
+Real models add chatter and markdown fences; the parser tolerates them
+under rules that took several iterations to settle:
 
 - **Chatter before the tag is ignored.** "Sure, here it is:" etc.
 - **The tag must be a line of its own.** SCRIPT or `ERROR <reason>`.

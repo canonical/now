@@ -385,3 +385,174 @@ func TestColonArgumentsArePaths(t *testing.T) {
 	assertEqual(t, "Args", opts.Args, []string{"9:", "b.txt", "1: foo/a.txt", "1::", "0:", "10:"})
 }
 
+func TestParseFormatFlag(t *testing.T) {
+	opts := mustParse(t, []string{"-f", "json", "q"})
+	assertEqual(t, "Format", opts.Format, "json")
+	assertEqual(t, "Output", opts.Output, "")
+
+	// = form.
+	opts = mustParse(t, []string{"-f=md", "q"})
+	assertEqual(t, "Format", opts.Format, "md")
+
+	// "sh" is a regular format value here.
+	opts = mustParse(t, []string{"-f", "sh", "q"})
+	assertEqual(t, "Format", opts.Format, "sh")
+
+	// "shell" is a quiet alias for "sh" (the only one; "bash" is not,
+	// as it implies a non-POSIX syntax).
+	opts = mustParse(t, []string{"-f", "shell", "q"})
+	assertEqual(t, "Format", opts.Format, "sh")
+
+	// Dotted and dashed formats are allowed.
+	opts = mustParse(t, []string{"-f", "a.b", "q"})
+	assertEqual(t, "Format", opts.Format, "a.b")
+	opts = mustParse(t, []string{"-f", "a-b", "q"})
+	assertEqual(t, "Format", opts.Format, "a-b")
+	opts = mustParse(t, []string{"-f", "a.b-c", "q"})
+	assertEqual(t, "Format", opts.Format, "a.b-c")
+
+	// Single char and 8 chars are valid boundaries.
+	opts = mustParse(t, []string{"-f", "a", "q"})
+	assertEqual(t, "Format", opts.Format, "a")
+	opts = mustParse(t, []string{"-f", "12345678", "q"})
+	assertEqual(t, "Format", opts.Format, "12345678")
+}
+
+func TestParseFormatFlagValidation(t *testing.T) {
+	tests := []struct {
+		name string
+		argv []string
+		want string
+	}{
+		{"missing value", []string{"-f"}, "-f requires a format"},
+		{"empty value", []string{"-f=", "q"}, "-f requires a format"},
+		{"uppercase rejected", []string{"-f", "JSON", "q"}, "invalid format"},
+		{"dot only rejected", []string{"-f", ".", "q"}, "invalid format"},
+		{"dash only rejected", []string{"-f", "-", "q"}, "invalid format"},
+		{"leading dot rejected", []string{"-f", ".json", "q"}, "invalid format"},
+		{"trailing dot rejected", []string{"-f", "json.", "q"}, "invalid format"},
+		{"underscore rejected", []string{"-f", "a_b", "q"}, "invalid format"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := cli.Parse(tt.argv, strings.NewReader(""))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("got %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseOutputFlagInfersFormat(t *testing.T) {
+	// -o with an extension infers the format (lowercased).
+	opts := mustParse(t, []string{"-o", "notes.md", "q"})
+	assertEqual(t, "Format", opts.Format, "md")
+	assertEqual(t, "Output", opts.Output, "notes.md")
+
+	// Uppercase extension is lowercased before matching.
+	opts = mustParse(t, []string{"-o", "notes.JSON", "q"})
+	assertEqual(t, "Format", opts.Format, "json")
+
+	// filepath.Ext returns only the last extension.
+	opts = mustParse(t, []string{"-o", "x.tar.gz", "q"})
+	assertEqual(t, "Format", opts.Format, "gz")
+}
+
+func TestParseOutputNoExtensionDefaultsSh(t *testing.T) {
+	// -o with no extension defaults to "sh".
+	opts := mustParse(t, []string{"-o", "notes", "q"})
+	assertEqual(t, "Format", opts.Format, "sh")
+	assertEqual(t, "Output", opts.Output, "notes")
+
+	// A dotfile (extension only, no stem) has an extension, not "sh".
+	opts = mustParse(t, []string{"-o", ".sh", "q"})
+	assertEqual(t, "Format", opts.Format, "sh")
+}
+
+func TestParseOutputInvalidExtensionErrors(t *testing.T) {
+	// An extension that does not match the format constraint is an
+	// error, since the user asked for a file we cannot classify.
+	_, err := cli.Parse([]string{"-o", "notes.a_b", "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "cannot infer output format from -o") {
+		t.Fatalf("got %v, want infer error", err)
+	}
+}
+
+func TestParseFormatOverridesOutputExtension(t *testing.T) {
+	// -f always wins over -o's extension; no cross-check.
+	opts := mustParse(t, []string{"-f", "json", "-o", "x.md", "q"})
+	assertEqual(t, "Format", opts.Format, "json")
+	assertEqual(t, "Output", opts.Output, "x.md")
+}
+
+func TestParseFormatConflicts(t *testing.T) {
+	// Run-control and confinement flags conflict with -f/-o.
+	tests := []struct {
+		name string
+		argv []string
+		want string
+	}{
+		{"-f -y", []string{"-f", "json", "-y", "q"}, "cannot use -y with -f or -o"},
+		{"-f -q", []string{"-f", "json", "-q", "q"}, "cannot use -q with -f or -o"},
+		{"-f -t", []string{"-f", "json", "-t", "q"}, "cannot use -t with -f or -o"},
+		{"-f -b", []string{"-f", "json", "-b", "q"}, "cannot use -b with -f or -o"},
+		{"-f -s", []string{"-f", "json", "-s", "q"}, "cannot use -s with -f or -o"},
+		{"-f -n", []string{"-f", "json", "-n", "q"}, "cannot use -n with -f or -o"},
+		{"-o -y", []string{"-o", "x.md", "-y", "q"}, "cannot use -y with -f or -o"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := cli.Parse(tt.argv, strings.NewReader(""))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("got %v, want %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestParseFormatConflictsGrants(t *testing.T) {
+	// -r/-w conflict with -f/-o. The path is validated first, so a
+	// missing path reports the path error; an existing one reports
+	// the conflict.
+	dir := t.TempDir()
+	_, err := cli.Parse([]string{"-f", "json", "-r", dir, "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "cannot use -r with -f or -o") {
+		t.Fatalf("got %v, want -r conflict", err)
+	}
+	_, err = cli.Parse([]string{"-f", "json", "-w", dir, "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "cannot use -w with -f or -o") {
+		t.Fatalf("got %v, want -w conflict", err)
+	}
+}
+
+func TestParseFormatShAllowsCommands(t *testing.T) {
+	// -c is allowed with -f sh: it feeds the script prompt as usual.
+	withFakeCommands(t, "fakeone")
+	opts := mustParse(t, []string{"-f", "sh", "-c", "fakeone", "q"})
+	assertEqual(t, "Format", opts.Format, "sh")
+	assertEqual(t, "len(Commands)", len(opts.Commands), 1)
+
+	// "shell" aliases "sh", so it takes the same script path and
+	// likewise allows -c.
+	opts = mustParse(t, []string{"-f", "shell", "-c", "fakeone", "q"})
+	assertEqual(t, "Format", opts.Format, "sh")
+	assertEqual(t, "len(Commands)", len(opts.Commands), 1)
+}
+
+func TestParseFormatNonShRejectsCommands(t *testing.T) {
+	// -c conflicts with a non-sh format: the format prompt has no
+	// command surface.
+	withFakeCommands(t, "fakeone")
+	_, err := cli.Parse([]string{"-f", "json", "-c", "fakeone", "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "cannot use -c with -f or -o") {
+		t.Fatalf("got %v, want -c conflict", err)
+	}
+}
+
+func TestParseOutputMissingValue(t *testing.T) {
+	_, err := cli.Parse([]string{"-o"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "-o requires a file path") {
+		t.Fatalf("got %v, want -o requires", err)
+	}
+}
+

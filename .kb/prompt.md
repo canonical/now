@@ -76,6 +76,52 @@ rules 1–3 define the reply protocol (the engine contract, see
 rules 5–6 constrain what the model writes. No per-rule rationale was
 recorded beyond what the rules themselves say.
 
+## The OUTPUT protocol (format mode)
+
+When `-f` selects a format other than `sh`, `Build` switches to a
+separate system prompt (`formatPrompt`) that asks the model to
+produce content in the named format rather than a script. The success
+delimiters are `---OUTPUT-START---` / `---OUTPUT-END---`; the failure
+delimiters are the same `---ERROR-START---` / `---ERROR-END---` as the
+script protocol, so a model that learned one protocol's error shape
+transfers directly. The format token is spliced into the system prompt
+via `%q` (twice — header and rule 2); it has been validated against
+the format constraint, so it carries no metacharacters that could break
+the prompt.
+
+The format prompt has no command surface: no `## ALLOWED COMMANDS`,
+no `## REFERENCES` (the model produces content, not a runnable
+script, and `-c` is rejected by the parser in this mode). The user
+message keeps `## REQUEST` and `## DATA` (see "Argument framing"
+below) but drops the script-only `"$@"` note, since nothing runs; the
+sanitization note stays, as the model still sees the replacement
+runes. The two prompts are kept as separate consts (`busyboxPrompt`,
+`formatPrompt`) rather than parameterizing one, so the SCRIPT and
+OUTPUT contracts stay distinct and a change to one cannot silently
+affect the other.
+
+## Argument framing (execute vs dump vs format)
+
+`BuildOptions.Output` distinguishes a script that will **execute**
+from one that will only be **dumped**; format mode ignores it. The
+three cases frame the args differently in the user message:
+
+- **Execute** (`Output == false`, script prompt): a `## "$@"` section
+  with one `$N | <arg>` line per arg (1-indexed), plus run-time notes
+  (use `"$@"`/`$1`/`$2` or literals; prefer literals for simple cases;
+  quote-escape warnings; sanitization warnings). The indexing tells
+  the model where each arg lands in `"$@"` at execution time.
+- **Dump** (`Output == true`, script prompt): a plain `## DATA` block,
+  one arg per line, with the inference note using "script". `"$@"` is
+  never mentioned — the script never runs, so `"$@"` is meaningless.
+- **Format** (`formatPrompt`): the same `## DATA` block via the shared
+  `writeDataBlock` helper, with the inference note using "output".
+
+`writeDataBlock(b, args, verb)` writes the `## DATA` block and is
+shared by the dump and format paths, so the two cannot drift apart.
+The execute path is separate because its `$N |` indexing and
+quote/sanitization notes are specific to a script that runs.
+
 ## Section grammar
 
 System message, in order:
@@ -97,9 +143,9 @@ User message, in order:
 
 - `## REQUEST` — the request text verbatim, multi-line supported
   (joined from stdin with newlines when the request came via `-`).
-- `## REQUEST DATA` — only when arguments exist; a fenced block with
-  one argument per line, then the two contract notes (see
-  sanitization below).
+- `## "$@"` (execute) or `## DATA` (dump/format) — only when
+  arguments exist; a fenced block with one argument per line, then
+  the contract notes (see "Argument framing" and sanitization below).
 
 ## Argument sanitization
 

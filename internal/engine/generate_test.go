@@ -52,6 +52,50 @@ func generate(t *testing.T, reply string) (string, error) {
 	})
 }
 
+// generateFormat runs Generate with a non-sh format, exercising the
+// OUTPUT reply protocol.
+func generateFormat(t *testing.T, format, reply string) (string, error) {
+	t.Helper()
+	f := completions.NewFakeLLM(reply)
+	url, err := f.Start()
+	if err != nil {
+		t.Fatalf("cannot start fake: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Stop() })
+	opts := setup.Options{APIURL: url, APIModel: "test"}
+	return engine.Generate(context.Background(), engine.GenerateOptions{
+		Request: "do something",
+		Format:  format,
+		Complete: func(ctx context.Context, messages []prompt.Message) (string, error) {
+			return completions.Complete(ctx, opts, messages)
+		},
+	})
+}
+
+// generateOutput runs Generate for a dumped script (Output true, Format
+// "sh") and returns the fake so the caller can inspect the recorded
+// request body.
+func generateOutput(t *testing.T, reply string) (*completions.FakeLLM, string, error) {
+	t.Helper()
+	f := completions.NewFakeLLM(reply)
+	url, err := f.Start()
+	if err != nil {
+		t.Fatalf("cannot start fake: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Stop() })
+	opts := setup.Options{APIURL: url, APIModel: "test"}
+	content, err := engine.Generate(context.Background(), engine.GenerateOptions{
+		Request: "do something",
+		Args:    []string{"a.txt"},
+		Format:  "sh",
+		Output:  true,
+		Complete: func(ctx context.Context, messages []prompt.Message) (string, error) {
+			return completions.Complete(ctx, opts, messages)
+		},
+	})
+	return f, content, err
+}
+
 func TestGenerateScript(t *testing.T) {
 	script, err := generate(t, "---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
 	if err != nil {
@@ -132,5 +176,92 @@ func TestGenerateUnexpectedReply(t *testing.T) {
 	_, err := generate(t, "Sure! Here's your script:\necho hi")
 	if err == nil || !strings.Contains(err.Error(), "unexpected model output") {
 		t.Fatalf("expected unexpected-output error, got %v", err)
+	}
+}
+
+func TestGenerateFormatOutput(t *testing.T) {
+	content, err := generateFormat(t, "json", "---OUTPUT-START---\n{\"a\":1}\n---OUTPUT-END---\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "content", content, "{\"a\":1}")
+}
+
+func TestGenerateFormatChatterOutsideTokens(t *testing.T) {
+	content, err := generateFormat(t, "json", "Sure:\n---OUTPUT-START---\n{\"a\":1}\n---OUTPUT-END---\nDone!")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "content", content, "{\"a\":1}")
+}
+
+func TestGenerateFormatEmptyOutput(t *testing.T) {
+	_, err := generateFormat(t, "json", "---OUTPUT-START---\n---OUTPUT-END---")
+	if err == nil || !strings.Contains(err.Error(), "empty output") {
+		t.Fatalf("expected empty output error, got %v", err)
+	}
+}
+
+func TestGenerateFormatMissingEndToken(t *testing.T) {
+	_, err := generateFormat(t, "json", "---OUTPUT-START---\n{\"a\":1}\n")
+	if err == nil || !strings.Contains(err.Error(), "unexpected model output") {
+		t.Fatalf("expected unexpected-output error, got %v", err)
+	}
+}
+
+func TestGenerateFormatErrorReply(t *testing.T) {
+	_, err := generateFormat(t, "json", "---ERROR-START---\ncannot perform request: bad\n---ERROR-END---")
+	if err == nil || !strings.Contains(err.Error(), "cannot perform request: bad") {
+		t.Fatalf("expected model error, got %v", err)
+	}
+}
+
+func TestGenerateFormatIgnoresScriptToken(t *testing.T) {
+	// In format mode a SCRIPT token is not a valid success marker;
+	// it is unexpected output.
+	_, err := generateFormat(t, "json", "---SCRIPT-START---\necho hi\n---SCRIPT-END---")
+	if err == nil || !strings.Contains(err.Error(), "unexpected model output") {
+		t.Fatalf("expected unexpected-output error, got %v", err)
+	}
+}
+
+func TestGenerateScriptIgnoresOutputToken(t *testing.T) {
+	// In script mode an OUTPUT token is not a valid success marker.
+	_, err := generate(t, "---OUTPUT-START---\necho hi\n---OUTPUT-END---")
+	if err == nil || !strings.Contains(err.Error(), "unexpected model output") {
+		t.Fatalf("expected unexpected-output error, got %v", err)
+	}
+}
+
+func TestGenerateOutputDropsArgAt(t *testing.T) {
+	// A dumped script (Output true) still uses the SCRIPT reply
+	// protocol, but the user message presents args as plain DATA,
+	// not as "$@" with $1/$2 indexing.
+	f, content, err := generateOutput(t, "---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "content", content, "echo hello")
+
+	req := f.LastRequest()
+	if req == nil {
+		t.Fatalf("no request recorded")
+	}
+	messages, _ := req["messages"].([]any)
+	if len(messages) != 2 {
+		t.Fatalf("len(messages) = %d, want 2", len(messages))
+	}
+	sys, _ := messages[0].(map[string]any)["content"].(string)
+	user, _ := messages[1].(map[string]any)["content"].(string)
+	// The system message is still the script prompt.
+	if !strings.Contains(sys, "---SCRIPT-START---") {
+		t.Errorf("dumped script should use the script prompt: %q", sys)
+	}
+	// The user message drops "$@" and uses a plain DATA block.
+	if strings.Contains(user, "$@") {
+		t.Errorf("dumped script user message should not mention $@: %q", user)
+	}
+	if !strings.Contains(user, "## DATA\n```\na.txt\n```") {
+		t.Errorf("dumped script user message should carry plain data: %q", user)
 	}
 }

@@ -23,6 +23,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/canonical/now/internal/prompt"
@@ -70,6 +71,18 @@ type Options struct {
 	// Buffered captures the script's output and shows it only when the
 	// script fails.
 	Buffered bool
+
+	// Format selects the output mode. Empty means the default run
+	// cycle (generate, approve, execute). "sh" means generate the
+	// script and write it out instead of presenting or running it. Any
+	// other value means generate formatted content in that format and
+	// write it out. Resolved from -f, or inferred from -o's extension
+	// when -f is absent.
+	Format string
+
+	// Output is the file path to write the generated script or
+	// formatted content to. Empty means write to stdout. Set by -o.
+	Output string
 }
 
 // ParseError is returned for invalid command lines; its message is meant to
@@ -96,7 +109,7 @@ with the context provided.
 Arguments and standard input lines are flattened into a single ordered
 sequence that is made available to the model and the script in "$@".
 
-  $ echo f1 f2 | now "cp [foo] files to [bar] dirs" [foo] - [bar] /d1 /d2
+  $ echo f1 f2 | now "cp FOO files to BAR dirs" FOO: - BAR: /d1 /d2
   for f in f1 f2; do
     for d in /d1 /d2; do
       cp "$f" "$d/"
@@ -109,19 +122,26 @@ explicit meaning. It's up to the request and the model to define it, and most
 often the model can tell what is meant with no further help. 
 
 Options:
+  <request>         Natural language request.
+  <arg>             Data made available to the model and script, ordered.
+  -                 Read either the request or the arguments from stdin.
 
-  <request>       Natural language request for operation to perform.
-  <arg>           Data made available to the model and script, in order.
-  -               Read either the request or the arguments from stdin.
-  -y              Auto-approve the generated script without asking.
-  -q              Auto-approve and also hide the script before running it.
-  -t              Trace each script command to stderr as it executes.
-  -b              Buffer script output and only show it on failure.
-  -c cmd,...      External command names from $PATH for the script to use.
-  -s              Enforce sandbox mode even without -r -w -n.
-  -r path -r ...  Enforce sandbox mode and allow read-only access to path.
-  -w path -w ...  Enforce sandbox mode and allow read-write access to path.
-  -n              Enforce sandbox mode and allow network usage.
+Running control:
+  -y                Auto-approve the generated script without asking.
+  -q                Auto-approve and also hide the script before running it.
+  -t                Trace each script command to stderr as it executes.
+  -b                Buffer script output and only show it on failure.
+  -c <cmd>,...      External command names from $PATH for the script to use.
+
+Sandbox mode:
+  -s                Enforce sandbox mode even without -r -w -n.
+  -r <path> -r ...  Enforce sandbox mode and allow read-only access to path.
+  -w <path> -w ...  Enforce sandbox mode and allow read-write access to path.
+  -n                Enforce sandbox mode and allow network usage.
+
+Output mode:
+  -o <path>         Just write the content. Default -f from file extension.
+  -f <format>       Just output content in the given format.
 
 Boolean flags may be bundled together.
 `
@@ -133,6 +153,12 @@ func Parse(argv []string, stdin io.Reader) (*Options, error) {
 
 	rest, err := parseFlags(argv, opts)
 	if err != nil {
+		return nil, err
+	}
+	if err := resolveFormat(opts); err != nil {
+		return nil, err
+	}
+	if err := checkFormatConflicts(opts); err != nil {
 		return nil, err
 	}
 	if len(rest) == 0 {
@@ -246,6 +272,26 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 			if err := addCommands(opts, strings.TrimPrefix(arg, "-c=")); err != nil {
 				return nil, err
 			}
+		case arg == "-f":
+			if i+1 >= len(argv) {
+				return nil, parseErrf("-f requires a format")
+			}
+			i++
+			if err := setFormat(opts, argv[i]); err != nil {
+				return nil, err
+			}
+		case strings.HasPrefix(arg, "-f="):
+			if err := setFormat(opts, strings.TrimPrefix(arg, "-f=")); err != nil {
+				return nil, err
+			}
+		case arg == "-o":
+			if i+1 >= len(argv) {
+				return nil, parseErrf("-o requires a file path")
+			}
+			i++
+			opts.Output = argv[i]
+		case strings.HasPrefix(arg, "-o="):
+			opts.Output = strings.TrimPrefix(arg, "-o=")
 		case len(arg) > 1 && arg[0] == '-' && strings.TrimRight(arg, "abcdefghijklmnopqrstuvwxyz") == "-":
 			for _, flag := range arg[1:] {
 				switch flag {
@@ -318,6 +364,81 @@ func addCommands(opts *Options, list string) error {
 			return err
 		}
 		opts.Commands = append(opts.Commands, cmd)
+	}
+	return nil
+}
+
+// formatRe constrains the -f value and the -o extension: lowercase
+// alphanumerics, optionally separated by dots or dashes.
+var formatRe = regexp.MustCompile(`^[a-z0-9]+([.-][a-z0-9]+)*$`)
+
+// setFormat validates and records the -f value. The value is taken
+// verbatim: -f does not lowercase, so an uppercase or otherwise
+// invalid value is an error rather than a silent fix. "shell" is a
+// quiet convenience alias for "sh" (the only one; "bash" is not, as
+// it implies a non-POSIX syntax). That alias is undocumented.
+func setFormat(opts *Options, val string) error {
+	if val == "" {
+		return parseErrf("-f requires a format")
+	}
+	if val == "shell" {
+		val = "sh"
+	}
+	if !formatRe.MatchString(val) {
+		return parseErrf("-f: invalid format %q", val)
+	}
+	opts.Format = val
+	return nil
+}
+
+// resolveFormat infers the format from -o's extension when -f was not
+// given. The extension is lowercased before matching the format
+// constraint; an empty extension means "sh" (write the script). An
+// extension that does not match the constraint is an error, since the
+// user asked for a file we cannot classify.
+func resolveFormat(opts *Options) error {
+	if opts.Format != "" || opts.Output == "" {
+		return nil
+	}
+	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(opts.Output), "."))
+	if ext == "" {
+		opts.Format = "sh"
+		return nil
+	}
+	if !formatRe.MatchString(ext) {
+		return parseErrf("cannot infer output format from -o, use -f")
+	}
+	opts.Format = ext
+	return nil
+}
+
+// checkFormatConflicts rejects flags that make no sense once a format
+// is selected: the run-control and confinement flags all assume the
+// script will execute, which write mode never does. -c is allowed only
+// for "sh", where it feeds the script prompt as in run mode.
+func checkFormatConflicts(opts *Options) error {
+	if opts.Format == "" {
+		return nil
+	}
+	for _, bad := range []struct {
+		flag string
+		set  bool
+	}{
+		{"-y", opts.Yes},
+		{"-q", opts.Quiet},
+		{"-t", opts.Trace},
+		{"-b", opts.Buffered},
+		{"-s", opts.Sandbox},
+		{"-n", opts.Network},
+		{"-r", len(opts.Readable) > 0},
+		{"-w", len(opts.Writable) > 0},
+	} {
+		if bad.set {
+			return parseErrf("cannot use %s with -f or -o", bad.flag)
+		}
+	}
+	if opts.Format != "sh" && len(opts.Commands) > 0 {
+		return parseErrf("cannot use -c with -f or -o")
 	}
 	return nil
 }

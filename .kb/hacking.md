@@ -115,3 +115,17 @@ design history is in `.kb/cli.md`.
   both the usage message in `internal/cli/options.go` and the respective
   code blocks in `README.md` in the same change. All these lists and the
   parser must not drift apart.
+- `README.md` has **two** usage excerpts, kept in sync with
+  `internal/cli/options.go` but with different scopes — do not collapse
+  them:
+  - The `## Usage` block mirrors the `usage` const's flag list
+    (the `Options` / `Running control` / `Sandbox mode` / `Output mode`
+    sections and their alignment/placeholders), but **compact**: drop
+    the const's prose description and example, keep only the flag
+    listing. Match the const's section headers and `<cmd>`/`<path>`/
+    `<format>` placeholders verbatim.
+  - The `## Sandboxing and isolation` section carries a **scoped
+    subset** (only the sandbox flags) as a "relevant parameters"
+    block. Keep it to that subset — do not expand it to the full list,
+    and keep its simpler `path` form (no `<>` placeholders), matching
+    the surrounding section's focus.

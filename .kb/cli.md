@@ -65,20 +65,96 @@ Order matters and each step's position is a decision:
    usage and exits zero *here*, not in main.
 3. Setup load — `$HOME/.now` or the injected `SetupPath` (exists for
    tests, which point it at a temp file with a fake API URL).
-4. `busybox.Probe` — resolves path + applets; both the prompt (applet
+4. **Write-mode branch** — when `-f`/`-o` selected a format, the cycle
+   diverges here and never reaches the run-mode steps below. See
+   "Write mode" below.
+5. `busybox.Probe` — resolves path + applets; both the prompt (applet
    list) and the sandbox (binary path) consume the result, so it
    precedes both.
-5. Grant assembly + `sandbox.Probe` when confining — including adding
+6. Grant assembly + `sandbox.Probe` when confining — including adding
    the `-c` command paths to `Readable` (the `-c` implies `-r` rule;
    note it applies *only when already confining* — `-c` alone never
    turns confinement on).
-6. `engine.Generate` — with `Complete` closing over the loaded setup
+7. `engine.Generate` — with `Complete` closing over the loaded setup
    options; this closure is the only place the completions package
    enters the cycle, keeping the engine decoupled (see
    `.kb/engine.md`).
-7. `Approve` — the CLI's own policy domain (below).
-8. `engine.Run` — only if approved; **not calling Run is the skip
+8. `Approve` — the CLI's own policy domain (below).
+9. `engine.Run` — only if approved; **not calling Run is the skip
    path**, there is no "don't run" flag to thread through.
+
+## Write mode (-f / -o)
+
+`-f` selects an output format; `-o` selects an output file. Either
+puts **now** in write mode: content is generated and written out, and
+nothing is approved or executed. The run-control and confinement flags
+(`-y -q -t -b -s -r -w -n`) are rejected by the parser in this mode,
+since they assume execution. `-c` is allowed only with `sh`, where it
+feeds the script prompt as in run mode; a non-`sh` format has no
+command surface.
+
+Format resolution, in `Parse` after flag parsing:
+
+- `-f` validates its value verbatim against `^[a-z0-9]+([.-][a-z0-9]+)*$`
+  (no lowercasing — uppercase is an error, not a fix). `"shell"` is a
+  quiet, undocumented alias for `"sh"` (the only one; `"bash"` is not,
+  as it implies a non-POSIX syntax). The alias is normalized in
+  `setFormat` before validation, so all downstream `== "sh"` checks
+  see the canonical form.
+- `-o` without `-f` infers the format from the file extension:
+  `filepath.Ext` lowercased, matched against the same constraint. An
+  empty extension means `sh` (write the script). An extension that
+  does not match is an error (`cannot infer output format from -o;
+  use -f`), since the user asked for a file we cannot classify.
+- `-f` always wins over `-o`'s extension; there is no cross-check
+  (`-f json -o x.md` writes JSON to `x.md`).
+
+Three modes branch in `cli.Run` on the resolved `Format`:
+
+- **Run mode** (`Format == ""`): the default cycle above.
+- **Write-script mode** (`Format == "sh"`): `busybox.Probe` still runs
+  (the applets feed the script prompt — the same code path as run
+  mode), then `engine.Generate`, then write. No sandbox probe, no
+  Approve, no Run.
+- **Format mode** (`Format` other): `busybox.Probe` is skipped entirely
+  (the model produces content, not a runnable script, so busybox is
+  not needed), then `engine.Generate`, then write.
+
+The `proposeSample` fallback (missing config → generate+run a config
+creator) is run-mode only: it would have to execute, and write mode
+never does. A missing config in write mode is a hard error.
+
+### The Output field (script-to-execute vs script-to-dump)
+
+Run mode and write-script mode share the script prompt and the SCRIPT
+reply protocol, but the args mean different things: a script that will
+**execute** reads them in `"$@"`, while a script that is only **dumped**
+never runs, so `"$@"` is meaningless. `BuildOptions.Output` (threaded
+`Options` → `GenerateOptions` → `BuildOptions`) carries that
+distinction:
+
+- **Run mode** (`Output == false`): the user message frames args as
+  `## "$@"` with `$1 | <arg>` / `$2 | <arg>` indexing and the run-time
+  notes (use `"$@"`/`$1`/`$2` or literals; quote-escape warnings;
+  sanitization warnings).
+- **Write-script mode** (`Output == true`): the user message frames
+  args as a plain `## DATA` block (one arg per line, no `$N |`), with
+  the inference note using "script". `"$@"` is never mentioned.
+- **Format mode**: `Output` is ignored; the user message uses the same
+  `## DATA` block (the shared `writeDataBlock` helper), with the
+  inference note using "output".
+
+`cli.Run` sets `Output: true` only in `writeOutput` (the write-mode
+branch); the run-mode `engine.Generate` call leaves it at its zero
+value (`false`). The system message is unaffected by `Output` — a
+dumped script still uses `busyboxPrompt` + `## ALLOWED COMMANDS` +
+`## REFERENCES` and the SCRIPT reply protocol, since the model still
+produces a script; only the user-message arg framing changes.
+
+Output writing appends a trailing newline always: formatted content
+tends to embed newlines, and a final newline is expected there. `-o`
+does not create parent directories (fails if the dir is missing) and
+does not pre-`Stat` the file (it is being created). Success is silent.
 
 ## Flag grammar
 
@@ -86,8 +162,9 @@ Order matters and each step's position is a decision:
   it is an argument. Pinned by tests (e.g. `-w` after the request is a
   plain argument).
 - `-y` approve, `-q` approve-and-hide, `-t` trace, `-c cmd,...`,
-  `-r path`, `-w path`, `-n` network, `-s` sandbox. `=`-forms work
-  for value-taking flags. Grants repeat and accumulate.
+  `-r path`, `-w path`, `-n` network, `-s` sandbox, `-f fmt`,
+  `-o file`. `=`-forms work for value-taking flags. Grants repeat and
+  accumulate.
 - Exactly one `-` placeholder in the whole invocation, either as the
   request (stdin lines joined with newlines; multi-line requests are a
   feature — organizing a request with space is a primary use case,

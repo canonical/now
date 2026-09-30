@@ -35,23 +35,49 @@ func TestBuildRequestOnly(t *testing.T) {
 	assertEqual(t, "len(msgs)", len(msgs), 2)
 	assertEqual(t, "system role", msgs[0].Role, "system")
 	assertEqual(t, "user role", msgs[1].Role, "user")
-	assertEqual(t, "user content", msgs[1].Content, "## REQUEST\nsay hi")
+	assertEqual(t, "user content", msgs[1].Content, "## REQUEST\nsay hi\n")
 }
 
 func TestBuildWithArgs(t *testing.T) {
-	msgs := prompt.Build(prompt.BuildOptions{
+	msg := prompt.Build(prompt.BuildOptions{
 		Request: "rename these",
 		Args:    []string{"a.txt", "b.txt"},
 	})
-	want := "## REQUEST\nrename these\n\n## REQUEST DATA\n```\na.txt\nb.txt\n```\n" +
-		"These lines may be accessed by the script in \"$@\" or as literal strings, whichever makes the script simple and clear.\n" +
-		"Note that any \uFFFD above replaces a non-printable character, but for the script the real string is available in \"$@\".\n"
+	want := "## REQUEST\nrename these\n\n## \"$@\"\n```\n$1 | a.txt\n$2 | b.txt\n```\n" +
+		"EVERY LINE above the LITERAL string in the respective index in \"$@\". " +
+		"Your job is to INFER what the data means BASED ON THE REQUEST and generate the script to SOLVE THE REQUEST.\n" +
+		"You may use \"$@\", $1, $2, etc, or the literal strings. Prefer STRING LITERALS rather than variables for SIMPLE cases.\n"
+	assertEqual(t, "user content", msg[1].Content, want)
+}
+
+func TestBuildScriptOutputDropsArgAt(t *testing.T) {
+	// A script to be dumped (Output true, Format "sh") never runs, so
+	// "$@" is meaningless: args are plain data, with no $N | indexing
+	// and no run-time notes.
+	msgs := prompt.Build(prompt.BuildOptions{
+		Request: "rename these",
+		Args:    []string{"a.txt", "b.txt"},
+		Format:  "sh",
+		Output:  true,
+	})
+	want := "## REQUEST\nrename these\n\n## DATA\n```\na.txt\nb.txt\n```\n" +
+		"EVERY LINE above is the LITERAL string in the data. " +
+		"Your job is to INFER what the data means BASED ON THE REQUEST and generate the script to SOLVE THE REQUEST.\n" +
+		"If you need any of this data in the script you must put it there yourself.\n"
 	assertEqual(t, "user content", msgs[1].Content, want)
+	if strings.Contains(msgs[1].Content, "$@") {
+		t.Errorf("dumped script should not mention $@: %q", msgs[1].Content)
+	}
+	// The system message is still the script prompt: it will execute
+	// nowhere, but the SCRIPT reply protocol and command surface apply.
+	if !strings.Contains(msgs[0].Content, "---SCRIPT-START---") {
+		t.Errorf("dumped script should still use the script prompt: %q", msgs[0].Content)
+	}
 }
 
 func TestBuildWithoutArgs(t *testing.T) {
 	msgs := prompt.Build(prompt.BuildOptions{Request: "q"})
-	if strings.Contains(msgs[1].Content, "REQUEST DATA") {
+	if strings.Contains(msgs[1].Content, "$@") {
 		t.Errorf("unexpected data section: %q", msgs[1].Content)
 	}
 }
@@ -64,9 +90,12 @@ func TestBuildArgSanitization(t *testing.T) {
 	// Printable arguments, including non-ASCII, pass through; unprintable
 	// characters are replaced by the replacement rune, and the note tells
 	// the model the real strings are in "$@".
-	want := "## REQUEST DATA\n```\nplain.txt\nwith\uFFFDtab\nwith\uFFFDnewline\nhéllo\n```\n"
+	want := "## \"$@\"\n```\n$1 | plain.txt\n$2 | with\uFFFDtab\n$3 | with\uFFFDnewline\n$4 | héllo\n```\n"
 	if !strings.Contains(msgs[1].Content, want) {
 		t.Errorf("data section = %q, want to contain %q", msgs[1].Content, want)
+	}
+	if !strings.Contains(msgs[1].Content, "The \uFFFD replaces non-printable characters, so you cannot use these lines as literals.") {
+		t.Errorf("missing sanitization note: %q", msgs[1].Content)
 	}
 }
 
@@ -105,7 +134,7 @@ func TestBuildReferencesSection(t *testing.T) {
 		t.Fatalf("REFERENCES section not found: %q", msgs[0].Content)
 	}
 	assertEqual(t, "references", msgs[0].Content[start:], "\n\n## REFERENCES\n\n### curl --help\ncurl usage:\n  curl [options] URL"+
-		"\n\n### jq --help\njq usage:\n  jq filter")
+		"\n### jq --help\njq usage:\n  jq filter")
 }
 
 func TestBuildWithoutCommands(t *testing.T) {
@@ -157,7 +186,7 @@ func TestBuildIncludesBusyboxApplets(t *testing.T) {
 
 func TestBuildMultiLineRequest(t *testing.T) {
 	msgs := prompt.Build(prompt.BuildOptions{Request: "line one\nline two"})
-	assertEqual(t, "user content", msgs[1].Content, "## REQUEST\nline one\nline two")
+	assertEqual(t, "user content", msgs[1].Content, "## REQUEST\nline one\nline two\n")
 }
 
 func TestSystemPromptPinned(t *testing.T) {
@@ -171,10 +200,57 @@ func TestSystemPromptPinned(t *testing.T) {
 		"---SCRIPT-END---",
 		"---ERROR-START---",
 		"---ERROR-END---",
-		"Use ONLY the explicitly allowed command line tools.",
+		"Use ONLY the commands in the ALLOWED COMMANDS section.",
 	} {
 		if !strings.Contains(sys, want) {
 			t.Errorf("system prompt missing %q", want)
 		}
+	}
+}
+
+func TestBuildFormatPrompt(t *testing.T) {
+	// A non-sh format builds the output-mode prompt: OUTPUT markers,
+	// the format named in the system message, and no command surface.
+	msgs := prompt.Build(prompt.BuildOptions{Request: "q", Format: "json"})
+	assertEqual(t, "len(msgs)", len(msgs), 2)
+	for _, want := range []string{
+		"---OUTPUT-START---",
+		"---OUTPUT-END---",
+		"---ERROR-START---",
+		"---ERROR-END---",
+		"\"json\"",
+	} {
+		if !strings.Contains(msgs[0].Content, want) {
+			t.Errorf("format system prompt missing %q", want)
+		}
+	}
+	if strings.Contains(msgs[0].Content, "## ALLOWED COMMANDS") {
+		t.Errorf("format prompt should not list commands: %q", msgs[0].Content)
+	}
+	if strings.Contains(msgs[0].Content, "---SCRIPT-START---") {
+		t.Errorf("format prompt should not mention SCRIPT: %q", msgs[0].Content)
+	}
+}
+
+func TestBuildFormatShUsesScriptPrompt(t *testing.T) {
+	// -f sh reuses the script prompt, so the SCRIPT markers appear.
+	msgs := prompt.Build(prompt.BuildOptions{Request: "q", Format: "sh", Applets: []string{"ls"}})
+	if !strings.Contains(msgs[0].Content, "---SCRIPT-START---") {
+		t.Errorf("sh format should use script prompt: %q", msgs[0].Content)
+	}
+	if !strings.Contains(msgs[0].Content, "## ALLOWED COMMANDS") {
+		t.Errorf("sh format should list commands: %q", msgs[0].Content)
+	}
+}
+
+func TestBuildFormatUserMessageDropsArgNote(t *testing.T) {
+	// The format user message keeps DATA but drops the script-only
+	// "$@" note, since nothing runs.
+	msgs := prompt.Build(prompt.BuildOptions{Request: "rename these", Args: []string{"a.txt"}, Format: "json"})
+	if strings.Contains(msgs[1].Content, "$@") {
+		t.Errorf("format user message should not mention $@: %q", msgs[1].Content)
+	}
+	if !strings.Contains(msgs[1].Content, "## DATA") {
+		t.Errorf("format user message should still carry data: %q", msgs[1].Content)
 	}
 }

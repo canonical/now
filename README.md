@@ -7,10 +7,12 @@ AI for sensitive terminal environments in a classic way.
 - [Overview](#overview)
 - [Usage](#usage)
 - [Configuration](#configuration)
+  - [Recommended models](#recommended-models)
 - [Arguments and the standard input](#arguments-and-the-standard-input)
-- [Busybox and arbitrary commands](#busybox-and-arbitrary-commands)
+- [Busybox and external commands](#busybox-and-external-commands)
 - [Security and safety](#security-and-safety)
 - [Sandboxing and isolation](#sandboxing-and-isolation)
+- [Plain output and formats](#plain-output-and-formats)
 - [Examples](#examples)
   - [Classic greeting](#classic-greeting)
   - [Tracing, quietly, on errors](#tracing-quietly-on-errors)
@@ -20,7 +22,9 @@ AI for sensitive terminal environments in a classic way.
   - [Implicit desired outcome](#implicit-desired-outcome)
   - [Interactive scripts](#interactive-scripts)
   - [Python scripts on-the-fly](#python-scripts-on-the-fly)
+  - [Custom external commands](#custom-external-commands)
   - [External JavaScript API](#external-javascript-api)
+  - [Arbitrary content summary](#arbitrary-content-summary)
 - [License](#license)
 
 ## Overview
@@ -63,19 +67,26 @@ Usage:
   now [options] "<request>" [<arg> ...]
 
 Options:
+  <request>         Natural language request.
+  <arg>             Data made available to the model and script, ordered.
+  -                 Read either the request or the arguments from stdin.
 
-  <request>       Natural language request for operation to perform.
-  <arg>           Data made available to the model and script, in order.
-  -               Read either the request or the arguments from stdin.
-  -y              Auto-approve the generated script without asking.
-  -q              Auto-approve and also hide the script before running it.
-  -t              Trace each script command to stderr as it executes.
-  -b              Buffer script output and only show it on failure.
-  -c cmd,...      External command names from $PATH for the script to use.
-  -s              Enforce sandbox mode even without -r -w -n.
-  -r path -r ...  Enforce sandbox mode and allow read-only access to path.
-  -w path -w ...  Enforce sandbox mode and allow read-write access to path.
-  -n              Enforce sandbox mode and allow network usage.
+Running control:
+  -y                Auto-approve the generated script without asking.
+  -q                Auto-approve and also hide the script before running it.
+  -t                Trace each script command to stderr as it executes.
+  -b                Buffer script output and only show it on failure.
+  -c <cmd>,...      External command names from $PATH for the script to use.
+
+Sandbox mode:
+  -s                Enforce sandbox mode even without -r -w -n.
+  -r <path> -r ...  Enforce sandbox mode and allow read-only access to path.
+  -w <path> -w ...  Enforce sandbox mode and allow read-write access to path.
+  -n                Enforce sandbox mode and allow network usage.
+
+Output mode:
+  -o <path>         Just write the content. Default -f from file extension.
+  -f <format>       Just output content in the given format.
 
 Boolean flags may be bundled together.
 ```
@@ -96,6 +107,10 @@ The `api-type` key selects the API kind; only `completions-v1` is supported for 
 If you run _now_ without a valid configuration, it will propose a script for creating it.
 
 
+### Recommended models
+
+All the testing and examples were done with _Qwen 3.8 27B NVFP4_ running locally, but any model that does well on terminal benchmarks will do well writing scripts.
+
 ## Arguments and the standard input
 
 Information related to the request is made available to the model either via command line arguments, or via the standard
@@ -113,7 +128,7 @@ and then made available to the generated script under `"$@"`.
 This example demonstrates the kind of flexibility and clarity that can be achieved as a side effect of this choice:
 
 ```
-$ echo file1 file2 | now "cp the [foo] files to the [bar] dirs" [foo] - [bar] /one /two
+$ echo file1 file2 | now "cp FOO files to BAR dirs" FOO: - BAR: /one /two
 for f in file1 file2; do
   for d in /one /two; do
     cp "$f" "$d/"
@@ -155,7 +170,8 @@ As expected given the state of modern models, the hints available are enough for
 assign the arguments properly.
 
 Commands supporting more complex APIs may choose to differentiate their output by checking if `$HELP_FOR_AGENT`
-is set to `1` when processing the `--help` argument. See [external JavaScript API](#external-javascript-api) in the examples.
+is set to `1` when processing the `--help` argument. See [External JavaScript API](#external-javascript-api) in the examples.
+
 
 ## Security and safety
 
@@ -216,7 +232,7 @@ $ now -s "how many users are in this system"
 wc -l < /etc/passwd
 [ ENTER | CTRL-C ]
 ```
-For the first command we guided to model to our choice of path, but for the second one
+For the first command we guided the model to our choice of path, but for the second one
 the model used its internal knowledge to attempt to solve the task at hand. Both are valid,
 useful, and work correctly. The problem, as stated earlier, is when you intend to run
 these commands without supervision.
@@ -240,6 +256,57 @@ echo "$e" > date2.txt
 sh: can't create date2.txt: Read-only file system
 error: script failed: exit status 1
 ```
+
+
+## Plain output and formats
+
+The core purpose and behavior of _now_ is centered around the execution
+of tasks with complete control of data shared and supervision of the outcome
+so it can universally assist in everyday terminal work, even inside sensitive
+environments where "smarter" tools are not welcome.
+
+As a bonus feature, _now_ also supports writing out the generated scripts
+as well as arbitrary code and data in any language and format supported
+by the underlying model. Obviously, if you generate code this way, make sure
+to read and understand it before running.
+
+To output shell scripts, provide the `-f sh` flag. This includes further
+instructions such as external command reference, but still follows a different
+path from traditional execution because the script will need to use the request
+data as literals and not as provided parameters.
+```
+$ now -f sh "print A to B" A=1 B=5
+seq 1 5
+```
+
+Any other format will use a more general approach so arbitrary code and
+data may be produced. The `-f` flag value must be a clean string formed by the
+characters `[-.a-z0-9]`, but is otherwise unconstrained. For example:
+```
+$ now -f py "print A to B, compact" A=1 B=5
+print(*range(1, 6))
+
+$ now -f txt "print A to B, compact" A=1 B=5
+1 2 3 4 5
+
+$ now -f json "print A to B, compact" A=1 B=5
+[1,2,3,4,5]
+```
+
+Both arguments and standard input work as usual:
+```
+$ echo A=1 | now -f txt "print A to B, compact" B=5 -
+1 2 3 4 5
+```
+
+Any of these can also be directly written onto a file:
+```
+$ now -o out.sh "print A to B" A=1 B=5
+$ cat out.sh
+seq 1 5
+```
+Without the `-f` flag, the file extension becomes the default format,
+and with no extension it falls back to shell.
 
 
 ## Examples
@@ -292,7 +359,7 @@ awk -F: '$7 ~ /bash/' /chroot/passwd | wc -l
 ### Explicit argument labels
 
 ```
-$ echo file1 file2 | now "cp the [foo] files to the [bar] dirs" [foo] - [bar] /one /two
+$ echo file1 file2 | now "cp FOO files to BAR dirs" FOO: - BAR: /one /two
 for f in file1 file2; do
   for d in /one /two; do
     cp "$f" "$d/"
@@ -350,10 +417,10 @@ EOF
 3.0
 ```
 
-Quietly, for the brave:
+Quietly using the plain mode, for the brave:
 
 ```
-$ echo 9 | python3 -c "$(now -q 'print a py program that prints the sqrt of the number in stdin')"
+$ echo 9 | python3 -c "$(now -f py 'print the sqrt of the number in stdin')"
 3.0
 ```
 
@@ -375,14 +442,24 @@ The app is in development so the model has no way of knowing it yet, but the too
 is documenting its own API via `--help` and `$HELP_FOR_AGENT`.
 
 ```
-$ now -c anystore "books count by year" books.db
-anystore books.db 'db.books.aggregate([{"$group":{"_id":"$year","count":{"$sum":1}}},{"$sort":{"_id":1}}])'
+$ now -c any-store-cli2 "how many readers live in Berlin" library.db
+any-store-cli2 library.db -e 'db.readers.find({"city":"Berlin"}).count()'
 [ ENTER | CTRL-C ]
 
-{"id":1965,"count":1}
-{"id":1984,"count":1}
-{"id":1937,"count":1}
-...
+3
+```
+
+### Arbitrary content summary
+
+```
+$ now --help 2>&1 | now -f txt "why would I use this, in few words?" -
+You use `now` when you want to turn a natural-language sentence into a
+small, reviewable shell script that runs in a sandbox — one-shot, no
+multi-turn LLM, no hidden tool calls. You see the script before it
+executes, and busybox + sandbox flags keep it from touching anything
+you haven't explicitly allowed.
+
+In short: NL → script → approve → safe run, in one step.
 ```
 
 ## License

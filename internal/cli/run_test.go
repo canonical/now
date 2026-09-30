@@ -319,6 +319,191 @@ func TestRunSampleConfigCancel(t *testing.T) {
 	}
 }
 
+func TestRunFormatShWritesScript(t *testing.T) {
+	// -f sh generates the script and writes it to stdout; nothing is
+	// approved or executed.
+	stdout, stderr, err := e2e(t, []string{"-f", "sh", "do something"}, "---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", stdout, "echo hello\n")
+	assertEqual(t, "stderr", stderr, "")
+}
+
+func TestRunFormatShWritesToFile(t *testing.T) {
+	// -f sh -o writes the script to the file; stdout stays empty.
+	out := filepath.Join(t.TempDir(), "script.sh")
+	stdout, stderr, err := e2e(t, []string{"-f", "sh", "-o", out, "do something"}, "---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", stdout, "")
+	assertEqual(t, "stderr", stderr, "")
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("cannot read output: %v", err)
+	}
+	assertEqual(t, "file content", string(data), "echo hello\n")
+}
+
+func TestRunOutputInfersSh(t *testing.T) {
+	// -o with no extension defaults to sh.
+	out := filepath.Join(t.TempDir(), "script")
+	stdout, _, err := e2e(t, []string{"-o", out, "do something"}, "---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", stdout, "")
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("cannot read output: %v", err)
+	}
+	assertEqual(t, "file content", string(data), "echo hello\n")
+}
+
+func TestRunFormatWritesContent(t *testing.T) {
+	// A non-sh format uses the OUTPUT protocol and writes the content.
+	stdout, stderr, err := e2e(t, []string{"-f", "json", "describe these"}, "---OUTPUT-START---\n{\"a\":1}\n---OUTPUT-END---\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", stdout, "{\"a\":1}\n")
+	assertEqual(t, "stderr", stderr, "")
+}
+
+func TestRunFormatWritesContentToFile(t *testing.T) {
+	out := filepath.Join(t.TempDir(), "out.json")
+	stdout, _, err := e2e(t, []string{"-f", "json", "-o", out, "describe these"}, "---OUTPUT-START---\n{\"a\":1}\n---OUTPUT-END---\n")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", stdout, "")
+	data, err := os.ReadFile(out)
+	if err != nil {
+		t.Fatalf("cannot read output: %v", err)
+	}
+	assertEqual(t, "file content", string(data), "{\"a\":1}\n")
+}
+
+func TestRunFormatErrorPropagates(t *testing.T) {
+	// An ERROR reply in format mode surfaces the model's reason.
+	_, _, err := e2e(t, []string{"-f", "json", "do something"}, "---ERROR-START---\ncannot perform request: bad\n---ERROR-END---")
+	if err == nil || !strings.Contains(err.Error(), "cannot perform request: bad") {
+		t.Fatalf("expected model error, got %v", err)
+	}
+}
+
+func TestRunFormatMissingConfigErrors(t *testing.T) {
+	// In write mode a missing configuration is a hard error: the
+	// propose-sample fallback would have to run, and write mode
+	// never runs anything.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+
+	var stdout, stderr strings.Builder
+	err := cli.Run(context.Background(), cli.RunOptions{
+		Argv:   []string{"-f", "json", "do something"},
+		Stdin:  strings.NewReader(""),
+		Stdout: &stdout,
+		Stderr: &stderr,
+	})
+	if err == nil {
+		t.Fatalf("expected error for missing config, got nil")
+	}
+	if strings.Contains(stderr.String(), "adjust as necessary") {
+		// The propose-sample path must NOT run in write mode.
+		t.Errorf("sample proposed in write mode: %q", stderr.String())
+	}
+}
+
+func TestRunFormatSkipsBusybox(t *testing.T) {
+	// A non-sh format produces content, not a runnable script, so
+	// busybox is not needed. With busybox unfindable on $PATH, format
+	// mode still succeeds; sh-write mode would fail to probe it.
+	t.Setenv("PATH", "")
+	stdout, _, err := e2e(t, []string{"-f", "json", "do something"}, "---OUTPUT-START---\n{\"a\":1}\n---OUTPUT-END---\n")
+	if err != nil {
+		t.Fatalf("format mode should not need busybox: %v", err)
+	}
+	assertEqual(t, "stdout", stdout, "{\"a\":1}\n")
+}
+
+func TestRunFormatShNeedsBusybox(t *testing.T) {
+	// -f sh reuses the script prompt, which lists the busybox
+	// applets, so busybox must be probed. With it unfindable, sh-write
+	// mode fails before the model is called.
+	t.Setenv("PATH", "")
+	_, _, err := e2e(t, []string{"-f", "sh", "do something"}, "---SCRIPT-START---\necho hi\n---SCRIPT-END---\n")
+	if err == nil || !strings.Contains(err.Error(), "busybox") {
+		t.Fatalf("expected busybox error, got %v", err)
+	}
+}
+
+func TestRunOutputMissingDirErrors(t *testing.T) {
+	// -o does not create parent directories: a path in a missing dir
+	// fails when writing.
+	out := filepath.Join(t.TempDir(), "nodir", "out.json")
+	_, _, err := e2e(t, []string{"-f", "json", "-o", out, "do something"}, "---OUTPUT-START---\n{\"a\":1}\n---OUTPUT-END---\n")
+	if err == nil || !strings.Contains(err.Error(), "cannot write output") {
+		t.Fatalf("expected write error, got %v", err)
+	}
+}
+
+func TestRunFormatShErrorPropagates(t *testing.T) {
+	// An ERROR reply in sh-write mode surfaces the model's reason,
+	// mirroring format mode.
+	_, _, err := e2e(t, []string{"-f", "sh", "do something"}, "---ERROR-START---\ncannot perform request: bad\n---ERROR-END---")
+	if err == nil || !strings.Contains(err.Error(), "cannot perform request: bad") {
+		t.Fatalf("expected model error, got %v", err)
+	}
+}
+
+func TestRunFormatShArgsAreData(t *testing.T) {
+	// Through the full cli.Run cycle, -f sh frames args as plain DATA,
+	// not as "$@" with $1/$2 indexing: the script is dumped, never
+	// executed, so "$@" is meaningless. Inspect the recorded request
+	// body to pin the prompt shape end-to-end.
+	f := completions.NewFakeLLM("---SCRIPT-START---\necho hi\n---SCRIPT-END---\n")
+	url, err := f.Start()
+	if err != nil {
+		t.Fatalf("cannot start fake: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Stop() })
+
+	setupPath := filepath.Join(t.TempDir(), ".now")
+	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\napi-model=test\n"), 0o600); err != nil {
+		t.Fatalf("cannot write setup: %v", err)
+	}
+
+	var stdout, stderr strings.Builder
+	err = cli.Run(context.Background(), cli.RunOptions{
+		Argv:      []string{"-f", "sh", "rename these", "a.txt", "b.txt"},
+		Stdin:     strings.NewReader(""),
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		SetupPath: setupPath,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	req := f.LastRequest()
+	if req == nil {
+		t.Fatalf("no request recorded")
+	}
+	messages, _ := req["messages"].([]any)
+	if len(messages) != 2 {
+		t.Fatalf("len(messages) = %d, want 2", len(messages))
+	}
+	user, _ := messages[1].(map[string]any)["content"].(string)
+	if strings.Contains(user, "$@") {
+		t.Errorf("dumped script should not mention $@: %q", user)
+	}
+	if !strings.Contains(user, "## DATA\n```\na.txt\nb.txt\n```") {
+		t.Errorf("dumped script should carry plain data: %q", user)
+	}
+}
+
 func TestRunSampleConfigNotOfferedUnattended(t *testing.T) {
 	// -y (and -q) get the plain missing-config error, not the offer:
 	// the side channel only exists with a human reviewing scripts.
