@@ -38,12 +38,18 @@ script touches only what the user grants.
 - The probe runs before script generation: a broken bwrap must not waste
   a model call and a human review. `TestRunSandboxFailsBeforeAPICall`
   pins this ordering (zero API requests on confinement failure).
-- Scripts see no `$PATH` inside the sandbox; every command invocation
-  resolves through aliases to absolute paths (see _Architecture_).
+- Scripts see no `$PATH` directories inside the sandbox unless the
+  interpreter discovery injected them: every command invocation
+  resolves through aliases to absolute paths (see _Architecture_),
+  and env-based shebangs get a `PATH` with exactly the resolved
+  interpreter directories (see _Confinement machinery_).
 - The working directory always exists inside and `--chdir` puts the
   script there: bound with real content when granted, an empty
-  read-only mount otherwise. A write to the ungranted cwd fails with
-  `EROFS` — never silently discards into a throwaway filesystem.
+  read-only mount otherwise — the path matches outside, but the
+  content is invisible without a grant at that path or a parent.
+  Writes to the ungranted cwd fail with `EROFS` — never silently
+  discard into a throwaway filesystem — and reads of its content
+  fail too (see _Working directory_ for the leak history).
 
 
 # Architecture
@@ -142,44 +148,175 @@ procfs itself and does not survive a bind.
 
 The confined command always starts in the host working directory:
 `--chdir` is unconditionally part of the vector (except when the cwd
-is `/`). The directory itself exists inside through one of two forms:
+is `/`), emitted **after** all binds. The directory itself exists
+inside through one of two forms:
 
-- **Granted** (a user grant, the implicit machinery, or the confined
-  command's path covers it): bound as usual, real content, writable
-  per the grant.
-- **Not granted**: an empty read-only mount — `--tmpfs <cwd>`
-  followed by `--ro-bind <cwd> <cwd>`, which re-binds the fresh tmpfs
-  onto itself read-only.
+- **Granted** (a user grant, the discovered loader paths, or the
+  confined command's path covers it): bound as usual, real content,
+  writable per the grant.
+- **Not granted**: an empty read-only mount — `--tmpfs <cwd>` plus a
+  `--remount-ro <cwd>` post-pass after the whole bind sequence. The
+  design intent: the path exists at the same location as outside —
+  comfortable for the user and for tools that build relative paths —
+  but its **content is invisible** unless explicitly allowed by a
+  grant at that path or at a parent.
 
 The read-only form is a deliberate rejection of the first version,
 which mounted a writable tmpfs as scratch: a script writing to the
 cwd would succeed silently and everything would be discarded with
 the sandbox. Failing loudly with `EROFS` is better than the script
-believing it created directories and files. bwrap has no `--ro-tmpfs`;
-the tmpfs-plus-self-ro-bind pair is the equivalent.
+believing it created directories and files.
 
-Ordering: the cwd mount comes **before** the grant binds, so a grant
-below the cwd (e.g. `-r <cwd>/sub`) layers on top of the empty mount
-and shows its real content, rather than being shadowed by it.
+**History — the content leak:** the original emission was
+`--tmpfs <cwd>` + `--ro-bind <cwd> <cwd>`, intending to re-bind the
+fresh tmpfs onto itself read-only. But the ro-bind's *source* is the
+host path, so it actually re-mounted the **host's real directory**
+(with its content) over the empty tmpfs: a relative read from the
+script resolved against the host's files, exposing cwd content the
+user never granted (contradicting the security model), while
+relative *writes* to granted files worked — by accident, through the
+leaked directory. The README's `date1.txt`/`date2.txt` example
+depended on that accident. `--remount-ro` fixes both sides: content
+hidden without a grant, and grants below the cwd still layer on top
+of the empty mount (the post-pass runs after them, and the remount
+is non-recursive so deeper writable binds stay writable). Pinned by
+`TestWrapCwdUngrantedHidesContent` (no read without a grant) and
+`TestWrapCwdGrantBelowCwd` (grant visible through the placeholder).
 
-`cwdGranted` decides which form: the cwd counts as granted when the
-confined command's path, an implicit dir, or a user grant sits at or
-above it.
+Ordering: the cwd tmpfs comes **before** deeper grant binds (bwrap
+mounts in argument order), and the `--remount-ro` post-pass comes
+**after** them — a mid-sequence remount would make the parent
+read-only and break binds below it with
+`Can't mkdir ...: Read-only file system`.
 
-## Confinement machinery (implicit grants)
+`coveredBy` decides which form: the cwd counts as covered when the
+confined command's path, a discovered loader path, or a user grant
+sits at or above it.
+
+## Confinement machinery (discovered readable paths)
 
 Inside the sandbox, bwrap binds read-only, with no user data content:
 
 - The busybox binary (the confined command) and the `-c` binaries
   (via the readable grants the engine adds).
-- `/lib`, `/lib64`, `/usr/lib`, `/usr/lib/x86_64-linux-gnu` and
-  `/etc/ld.so.cache` — existence-checked, so only present ones are bound.
-  **This list is provisional**: it was written for this devcontainer and
-  is wrong in both directions elsewhere (missing loader dirs on other
-  architectures/distros, or binding whole trees the binaries do not
-  need). Deriving the paths at probe time is tracked in TODO phase 11.
+- The loader directories and cache the confined binaries depend on,
+  **discovered at probe time** via `ldd`: each binary's transitive
+  resolution contributes the directories of every resolved library
+  and the loader itself; a static binary contributes nothing; an
+  `ldd` failure on one binary is a non-fatal skip (the probe's real
+  bwrap run fails loudly if something needed is missing).
+- **The shebang interpreter chain** for `-c` commands that are
+  scripts: when `ldd` reports "not a dynamic executable", the first
+  line is parsed — a direct interpreter path is bound and resolved
+  recursively (it may itself be a wrapper script, depth-capped at
+  3); an `/usr/bin/env NAME` shebang binds the env binary as
+  written, resolves NAME from the host `$PATH`, and binds it; env's
+  runtime lookup then finds it through the inherited host `PATH`.
+  Extra shebang arguments are ignored.
+  **Deliberately limited to `-c` commands**: a script granted via
+  `-r`/`-w` (data the user handed over, not a declared executable)
+  does not get its interpreter bound — if the model decides to
+  execute it, the user grants the interpreter explicitly
+  (e.g. `-r /bin/sh`). Extending discovery to granted paths would
+  have no natural stopping rule (scan entire `-r` directories?), so
+  discovery stays proportional to declared intent.
+  **A missing interpreter is a hard error at probe time**, before the
+  model call: a shebang naming a nonexistent interpreter, or an
+  `env NAME` whose NAME does not resolve, means the command cannot
+  run at all — `cannot find interpreter %q for %q` beats an opaque
+  exec failure after approval.
+- **The conventional trees**, always: `/lib`, `/lib64`, `/usr/lib`,
+  `/usr/local/lib`, the multiarch pair `/lib/<triplet>` and
+  `/usr/lib/<triplet>`, and `/etc/ld.so.cache`. The lib dirs are the
+  canonical loader symlink roots — the kernel walks `PT_INTERP`
+  literally (`/lib64/ld-linux...`), and on merged-usr systems those
+  are symlinks whose relative targets resolve through `/lib`, which
+  `ldd` never reports (it only yields resolved `/usr` paths), so the
+  symlink view must be bound explicitly or the loader is
+  unreachable despite being "bound". `/usr/lib` and `/usr/local/lib`
+  are the conventional homes of interpreter runtime data (python's
+  stdlib, node modules, perl lib) — data no `ldd`-style probe can
+  discover. The multiarch pair is generated from the **compile-time
+  GOARCH** via a fixed triplet table (`amd64` → `x86_64-linux-gnu`,
+  `arm64` → `aarch64-linux-gnu`, ...): the mapping is per
+  architecture, not per host, so it needs no external reads and is
+  correct wherever the binary runs. This whole set is a deliberate,
+  bounded slice of over-binding: the alternative (executing
+  interpreters at probe time to ask them where their data lives) was
+  rejected as a trust decision. The triplet table was first proposed
+  as a *replacement* for ldd discovery, rejected then in favor of the
+  dynamic approach, and later revived *on top of it* — the same
+  classic-directories reasoning that added `/usr/lib` covers the
+  multiarch dirs.
 - `--dev /dev` for devices, `--tmpfs /tmp` for scratch space,
   `--unshare-all` for namespaces (`--share-net` when `-n`).
+
+**Symlinked paths claim both the link and its resolved target**
+(`filepath.EvalSymlinks` at set-collection): the kernel and loader
+look up literal paths (a shebang names `/usr/bin/env`; `PT_INTERP`
+names `/lib64/ld-linux...`), so the link path must be bound — and
+the target must be bound too, or the link dangles inside where its
+target directory does not exist.
+
+**The sandbox `PATH`**: bwrap inherits the host environment, so
+env-based shebangs resolve through the inherited host `PATH` — which,
+by construction, contains the directory the interpreter was resolved
+from at discovery time. A `PATH` injection (`Options.Env` →
+`--setenv`) was implemented and then **removed**: it was motivated by
+the stale claim that scripts see no `$PATH` inside (the variable is
+inherited; what was true is that the directories it named mostly did
+not exist inside), and the interpreter being bound at its absolute
+path makes the injection functionally redundant. Reintroduce only
+with a concrete need, not from the old premise.
+
+## Bind ordering and the emission table
+
+Every mount — discovered loader paths, user grants, the confined binary, the
+ungranted-cwd placeholder — is a claim on a path expressed as
+composable flags: `bindRead` (`--ro-bind`), `bindWrite` (`--bind`),
+`bindTemp` (`--tmpfs`). Same-path claims OR together, so
+classification is order-independent by construction; the emission is
+a function of the merged set:
+
+| flags | emission | meaning |
+|---|---|---|
+| read | `--ro-bind p p` | read-only grant |
+| write | `--bind p p` | read-write (write dominates read) |
+| temp | `--tmpfs p` | fresh empty writable mount |
+| read+temp | `--tmpfs p`, then `--remount-ro p` after the sequence | fresh empty **read-only** mount |
+| write+temp | `--tmpfs p` | fresh empty writable mount |
+| read+write | `--bind p p` | write wins |
+| read+write+temp | `--tmpfs p` | fresh empty writable mount |
+
+The read-only remount for temp+read paths is a **post-pass** over the
+whole ordered sequence, not part of the path's own emission:
+`--remount-ro` is non-recursive and needs the parent writable while
+deeper binds mount under it, so a temp+read path (the ungranted cwd)
+goes read-only only after everything below it is in place. The
+original form — `--tmpfs p` + `--ro-bind p p` — was a **content leak**:
+the ro-bind's source is the host path, so it re-mounted the host's real
+directory (with its content) over the empty tmpfs, and a relative read
+from the script resolved against the host's files. Pinned by
+`TestWrapCwdUngrantedHidesContent`.
+
+`orderBinds` then sorts the merged entries **shallow-first** (depth,
+lexicographic tie-break): bwrap mounts in argument order, so a deeper
+path always mounts on top of a shallower one. This is the single
+ordering authority — before it, `-w /a -r /a` in one flag order
+silently produced a read-only bind (the ro shadowed the rw), and
+interleavings like rw `/a`, ro `/a/b`, rw `/a/b/c` were inexpressible
+with separate ro/rw emission loops. The ungranted cwd is a
+`bindTemp|bindRead` claim at `opts.Cwd`, added only when
+`coveredBy` reports no other claim at or above it; it participates in
+the same ordering, so a grant below the cwd mounts on top of the
+placeholder rather than being shadowed by it.
+
+`Probe` discovers the loader paths via `discoverReadable` and
+**prepends them to `Readable`**, so they flow through the same
+normalization: a user grant at the same path overrides it
+(most-permissive rule), a grant below it mounts on top. `Probe`
+returns the full updated `Options` — the same caching pattern as
+`Bwrap`, extended to the grant list.
 
 Rejected earlier: a generated `/bin` directory of applet symlinks bound
 at `/bin` with `PATH=/bin` — it worked (busybox re-execs applets fine

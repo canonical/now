@@ -149,20 +149,22 @@ func Run(ctx context.Context, opts RunOptions) error {
 	sandboxOn := parsed.Sandbox || parsed.Network || len(parsed.Readable) > 0 || len(parsed.Writable) > 0
 	if sandboxOn {
 		// The allowed commands are granted readable so their binaries
-		// are bound inside the sandbox.
+		// are bound inside the sandbox, and their loader directories
+		// are discovered by the probe.
+		var cmdPaths []string
 		for _, c := range parsed.Commands {
 			grants.Readable = append(grants.Readable, c.Path)
+			cmdPaths = append(cmdPaths, c.Path)
 		}
 		cwd, err := os.Getwd()
 		if err != nil {
 			return fmt.Errorf("cannot confine: %v", err)
 		}
 		grants.Cwd = cwd
-		bwrap, err := sandbox.Probe(grants, busyOpts.Path)
+		grants, err = sandbox.Probe(grants, busyOpts.Path, cmdPaths...)
 		if err != nil {
 			return err
 		}
-		grants.Bwrap = bwrap
 	}
 
 	// From here on the cycle is shared: only the script source differs.

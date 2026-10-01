@@ -50,11 +50,10 @@ func runIn(t *testing.T, opts sandbox.Options, line string) (string, error) {
 	if err != nil {
 		t.Fatalf("cannot find busybox: %v", err)
 	}
-	bwrap, err := sandbox.Probe(opts, busybox)
+	opts, err = sandbox.Probe(opts, busybox)
 	if err != nil {
 		return "", err
 	}
-	opts.Bwrap = bwrap
 
 	var out bytes.Buffer
 	bargs, err := sandbox.Args(opts, busybox, "sh", "-c", line)
@@ -114,17 +113,20 @@ func fakeCalls(t *testing.T, dir string) []string {
 }
 
 func TestProbeCachesBwrap(t *testing.T) {
-	// Probe with Options.Bwrap already set returns it immediately.
+	// Probe with Options.Bwrap already set returns the options
+	// unchanged, without re-deriving machinery.
 	busybox, err := exec.LookPath("busybox")
 	if err != nil {
 		t.Fatalf("cannot find busybox: %v", err)
 	}
 	want := sandbox.Bwrap{Path: "/cached/bwrap", HostProc: true}
-	got, err := sandbox.Probe(sandbox.Options{Bwrap: want}, busybox)
+	in := sandbox.Options{Bwrap: want, Readable: []string{"/a"}}
+	got, err := sandbox.Probe(in, busybox)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertEqual(t, "Bwrap", got, want)
+	assertEqual(t, "Bwrap", got.Bwrap, want)
+	assertEqual(t, "Readable", got.Readable, []string{"/a"})
 }
 
 func TestProbeMissingBwrap(t *testing.T) {
@@ -149,12 +151,12 @@ func TestProbeFreshProc(t *testing.T) {
 		t.Fatalf("cannot find busybox: %v", err)
 	}
 
-	bwrap, err := sandbox.Probe(sandbox.Options{}, busybox)
+	opts, err := sandbox.Probe(sandbox.Options{}, busybox)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertEqual(t, "HostProc", bwrap.HostProc, false)
-	assertEqual(t, "fake is the resolved bwrap", filepath.Base(bwrap.Path), "bwrap")
+	assertEqual(t, "HostProc", opts.Bwrap.HostProc, false)
+	assertEqual(t, "fake is the resolved bwrap", filepath.Base(opts.Bwrap.Path), "bwrap")
 
 	// Args then builds the fresh procfs form.
 	last := fakeCalls(t, dir)[len(fakeCalls(t, dir))-1]
@@ -170,11 +172,11 @@ func TestProbeDeniedProcFallsBackToHost(t *testing.T) {
 		t.Fatalf("cannot find busybox: %v", err)
 	}
 
-	bwrap, err := sandbox.Probe(sandbox.Options{}, busybox)
+	opts, err := sandbox.Probe(sandbox.Options{}, busybox)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	assertEqual(t, "HostProc", bwrap.HostProc, true)
+	assertEqual(t, "HostProc", opts.Bwrap.HostProc, true)
 
 	// Args then builds the host proc form.
 	last := fakeCalls(t, dir)[len(fakeCalls(t, dir))-1]
@@ -203,11 +205,11 @@ func TestProbeDeterminesProcForm(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot find busybox: %v", err)
 	}
-	bwrap, err := sandbox.Probe(sandbox.Options{}, busybox)
+	opts, err := sandbox.Probe(sandbox.Options{}, busybox)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if bwrap.Path == "" {
+	if opts.Bwrap.Path == "" {
 		t.Fatalf("expected resolved bwrap path")
 	}
 	// Both forms are valid outcomes; the assertion is that Run then
@@ -257,6 +259,25 @@ func TestWrapCwdUngrantedIsReadOnly(t *testing.T) {
 	}
 	if strings.Contains(out, "fresh\n") {
 		t.Errorf("write to ungranted cwd appeared to succeed: %q", out)
+	}
+}
+
+func TestWrapCwdUngrantedHidesContent(t *testing.T) {
+	// The ungranted cwd must not leak the host directory's content:
+	// --chdir runs after the cwd's tmpfs is mounted, so a relative
+	// read resolves against the empty mount, not the real directory.
+	// This pins a regression where --chdir preceded the binds and the
+	// process kept the host directory as its cwd.
+	requireBwrap(t)
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "secret.txt"), []byte("secret\n"), 0o644); err != nil {
+		t.Fatalf("cannot write secret: %v", err)
+	}
+	t.Chdir(dir)
+
+	_, err := runIn(t, sandbox.Options{Cwd: dir}, "cat secret.txt")
+	if err == nil {
+		t.Fatalf("expected read of ungranted cwd content to fail, got success")
 	}
 }
 
@@ -402,4 +423,232 @@ func TestWrapNetworkShared(t *testing.T) {
 	}
 	// The distinction: unshared fails differently, but both error; the
 	// meaningful check is that shared networking can reach the stack.
+}
+
+func TestWrapWriteOverridesReadSamePath(t *testing.T) {
+	// -w and -r on the same path yield a writable bind regardless of
+	// flag order: the most permissive grant wins, never a read-only
+	// bind shadowing the writable one.
+	requireBwrap(t)
+	dir := t.TempDir()
+	for _, opts := range []sandbox.Options{
+		{Readable: []string{dir}, Writable: []string{dir}},
+		{Writable: []string{dir}, Readable: []string{dir}},
+	} {
+		_, err := runIn(t, opts, "echo written > "+filepath.Join(dir, "data.txt"))
+		if err != nil {
+			t.Fatalf("expected writable to win, got error: %v", err)
+		}
+		data, err := os.ReadFile(filepath.Join(dir, "data.txt"))
+		if err != nil {
+			t.Fatalf("cannot read back: %v", err)
+		}
+		assertEqual(t, "content", string(data), "written\n")
+		if err := os.Remove(filepath.Join(dir, "data.txt")); err != nil {
+			t.Fatalf("cannot clean: %v", err)
+		}
+	}
+}
+
+func TestWrapNestedWriteInsideRead(t *testing.T) {
+	// A writable grant inside a readable one: the deeper writable
+	// bind mounts on top of the shallower read-only one.
+	requireBwrap(t)
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatalf("cannot create sub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "ro.txt"), []byte("ro\n"), 0o644); err != nil {
+		t.Fatalf("cannot write ro: %v", err)
+	}
+
+	out, err := runIn(t, sandbox.Options{Readable: []string{dir}, Writable: []string{sub}},
+		"cat "+filepath.Join(dir, "ro.txt")+"; echo w > "+filepath.Join(sub, "w.txt"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "readable parent", out, "ro\n")
+	data, err := os.ReadFile(filepath.Join(sub, "w.txt"))
+	if err != nil {
+		t.Fatalf("cannot read back: %v", err)
+	}
+	assertEqual(t, "writable child", string(data), "w\n")
+}
+
+func TestWrapNestedReadInsideWrite(t *testing.T) {
+	// A readable grant inside a writable one: the deeper read-only
+	// bind mounts on top of the shallower writable one, and writing
+	// there fails loudly.
+	requireBwrap(t)
+	dir := t.TempDir()
+	sub := filepath.Join(dir, "sub")
+	if err := os.Mkdir(sub, 0o755); err != nil {
+		t.Fatalf("cannot create sub: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(sub, "ro.txt"), []byte("ro\n"), 0o644); err != nil {
+		t.Fatalf("cannot write ro: %v", err)
+	}
+
+	_, err := runIn(t, sandbox.Options{Writable: []string{dir}, Readable: []string{sub}},
+		"echo w > "+filepath.Join(sub, "w.txt")+" 2>&1")
+	if err == nil {
+		t.Fatalf("expected write failure inside read-only child, got success")
+	}
+	// The parent stays writable.
+	_, err = runIn(t, sandbox.Options{Writable: []string{dir}, Readable: []string{sub}},
+		"echo w > "+filepath.Join(dir, "w.txt"))
+	if err != nil {
+		t.Fatalf("expected parent to stay writable, got error: %v", err)
+	}
+}
+
+func TestWrapInterleavedThreeLevels(t *testing.T) {
+	// The full interleaving case: rw /a, ro /a/b, rw /a/b/c — the
+	// emission must interleave bind kinds by depth, which separate
+	// ro/rw loops cannot express.
+	requireBwrap(t)
+	a := t.TempDir()
+	b := filepath.Join(a, "b")
+	c := filepath.Join(b, "c")
+	for _, d := range []string{b, c} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatalf("cannot create %s: %v", d, err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(b, "ro.txt"), []byte("ro\n"), 0o644); err != nil {
+		t.Fatalf("cannot write ro: %v", err)
+	}
+
+	opts := sandbox.Options{
+		Readable: []string{b},
+		Writable: []string{a, c},
+	}
+	// The middle level is read-only: writing there fails.
+	_, err := runIn(t, opts, "echo x > "+filepath.Join(b, "x.txt")+" 2>&1")
+	if err == nil {
+		t.Fatalf("expected write failure at read-only middle level, got success")
+	}
+	// The deepest level is writable again, on top of the read-only one.
+	_, err = runIn(t, opts, "echo w > "+filepath.Join(c, "w.txt"))
+	if err != nil {
+		t.Fatalf("expected deepest level writable, got error: %v", err)
+	}
+	data, err := os.ReadFile(filepath.Join(c, "w.txt"))
+	if err != nil {
+		t.Fatalf("cannot read back: %v", err)
+	}
+	assertEqual(t, "deepest writable", string(data), "w\n")
+	// The top level is writable too.
+	_, err = runIn(t, opts, "echo t > "+filepath.Join(a, "t.txt"))
+	if err != nil {
+		t.Fatalf("expected top level writable, got error: %v", err)
+	}
+}
+
+func TestArgsCleansPaths(t *testing.T) {
+	// Args cleans paths when collecting the bind set: /foo and /foo/
+	// are the same directory, so their claims merge into one bind
+	// rather than emitting two, and the depth sort never sees a
+	// duplicate or trailing separator. The paths must exist: Args
+	// existence-checks before emitting.
+	dir := t.TempDir()
+	got, err := sandbox.Args(sandbox.Options{
+		Bwrap:    sandbox.Bwrap{Path: "/bwrap"},
+		Readable: []string{dir + "/"},
+		Writable: []string{dir},
+	}, "/bin/busybox")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	joined := strings.Join(got, " ")
+	if strings.Count(joined, "--bind "+dir+" "+dir) != 1 {
+		t.Errorf("expected one writable bind for %s, got %q", dir, joined)
+	}
+	if strings.Contains(joined, "--ro-bind "+dir+" "+dir) {
+		t.Errorf("read-only bind for %s should have merged into writable: %q", dir, joined)
+	}
+}
+
+func TestWrapConfinedScriptExecutes(t *testing.T) {
+	// The phase-2 pin: a -c command that is an interpreted script
+	// executes under confinement. The interpreter chain is cooked
+	// from busybox so the test is self-contained: tool → (env +
+	// interp) → busybox sh, covering the env shebang form, a
+	// two-level script chain, and a static-ELF terminal. env finds
+	// the cooked interpreter through the inherited host PATH, which
+	// the test puts the fixture dir on.
+	requireBwrap(t)
+	busybox, err := exec.LookPath("busybox")
+	if err != nil {
+		t.Fatalf("cannot find busybox: %v", err)
+	}
+	dir := t.TempDir()
+	t.Setenv("PATH", dir+":"+os.Getenv("PATH"))
+
+	// The interpreter is itself a script, terminating at busybox:
+	// the kernel runs "busybox sh interp tool", so its body re-execs
+	// the tool under busybox sh.
+	interp := filepath.Join(dir, "interp")
+	if err := os.WriteFile(interp, []byte("#!"+busybox+" sh\nexec \""+busybox+"\" sh \"$1\"\n"), 0o755); err != nil {
+		t.Fatalf("cannot write interpreter: %v", err)
+	}
+	script := filepath.Join(dir, "tool")
+	if err := os.WriteFile(script, []byte("#!/usr/bin/env interp\necho \"hello from script\"\n"), 0o755); err != nil {
+		t.Fatalf("cannot write script: %v", err)
+	}
+
+	opts, err := sandbox.Probe(sandbox.Options{Readable: []string{script}}, busybox, script)
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	bargs, err := sandbox.Args(opts, busybox, "sh", "-c", script)
+	if err != nil {
+		t.Fatalf("args: %v", err)
+	}
+	var out bytes.Buffer
+	cmd := exec.Command(bargs[0], bargs[1:]...)
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("confined script failed: %v\noutput: %s", err, out.String())
+	}
+	assertEqual(t, "output", out.String(), "hello from script\n")
+}
+
+func TestWrapConfinedPythonStdlib(t *testing.T) {
+	// A real-world interpreter: python needs its stdlib under
+	// /usr/lib, the conventional-tree part of the discovery that no
+	// ldd-style probe can see. Skips where python3 is absent; the
+	// cooked-chain test above is the always-available pin.
+	requireBwrap(t)
+	if _, err := exec.LookPath("python3"); err != nil {
+		t.Skip("python3 is not available")
+	}
+	dir := t.TempDir()
+	script := filepath.Join(dir, "tool.py")
+	if err := os.WriteFile(script, []byte("#!/usr/bin/env python3\nprint(\"hello from script\")\n"), 0o755); err != nil {
+		t.Fatalf("cannot write script: %v", err)
+	}
+
+	busybox, err := exec.LookPath("busybox")
+	if err != nil {
+		t.Fatalf("cannot find busybox: %v", err)
+	}
+	opts, err := sandbox.Probe(sandbox.Options{Readable: []string{script}}, busybox, script)
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+	bargs, err := sandbox.Args(opts, busybox, "sh", "-c", script)
+	if err != nil {
+		t.Fatalf("args: %v", err)
+	}
+	var out bytes.Buffer
+	cmd := exec.Command(bargs[0], bargs[1:]...)
+	cmd.Stdout = &out
+	cmd.Stderr = &out
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("confined script failed: %v\noutput: %s", err, out.String())
+	}
+	assertEqual(t, "output", out.String(), "hello from script\n")
 }
