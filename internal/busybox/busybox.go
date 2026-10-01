@@ -53,7 +53,22 @@ func Probe(opts Options) (Options, error) {
 		return Options{}, fmt.Errorf("cannot list busybox applets: %w", err)
 	}
 
-	applets := strings.Fields(string(out))
+	// The [ and [[ applets are dropped from the list: they are shell
+	// builtins the model knows well and needs no guidance on, so
+	// listing them in the prompt is pure noise. static-sh is dropped
+	// too: it is an alias for the shell itself, never a command a
+	// script would intend to invoke. Everything else stays listed —
+	// the model is told to use only the allowed commands, so removing
+	// an applet it might legitimately emit risks it avoiding valid
+	// shell.
+	var applets []string
+	for _, name := range strings.Fields(string(out)) {
+		switch name {
+		case "[", "[[", "static-sh":
+			continue
+		}
+		applets = append(applets, name)
+	}
 	if len(applets) == 0 {
 		return Options{}, fmt.Errorf("cannot list busybox applets: empty output")
 	}

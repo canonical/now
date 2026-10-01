@@ -58,6 +58,21 @@ func TestProbeResolvesBusybox(t *testing.T) {
 	assertEqual(t, "applets", opts.Applets, []string{"sh", "ls", "cat"})
 }
 
+func TestProbeDropsBracketApplets(t *testing.T) {
+	// The [ and [[ applets are dropped: they are shell builtins the
+	// model knows well, so listing them in the prompt is pure noise.
+	// static-sh is dropped too: an alias for the shell itself. Other
+	// applets stay listed — the model is told to use only the allowed
+	// commands, so removing one it might legitimately emit risks it
+	// avoiding valid shell.
+	fakeBusybox(t, "#!/bin/sh\necho sh [ [[ static-sh cat\n")
+	opts, err := busybox.Probe(busybox.Options{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "applets", opts.Applets, []string{"sh", "cat"})
+}
+
 func TestProbeKeepsFilledOptions(t *testing.T) {
 	// An already-resolved Options is returned as is, so probing twice
 	// does not re-run busybox --list.
