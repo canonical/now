@@ -21,7 +21,7 @@ AI for sensitive terminal environments in a classic way.
   - [Implicit arguments](#implicit-arguments)
   - [Implicit desired outcome](#implicit-desired-outcome)
   - [Interactive scripts](#interactive-scripts)
-  - [Python scripts on-the-fly](#python-scripts-on-the-fly)
+  - [Running verified Python scripts](#running-verified-python-scripts)
   - [Custom external commands](#custom-external-commands)
   - [External JavaScript API](#external-javascript-api)
   - [Arbitrary content summary](#arbitrary-content-summary)
@@ -39,10 +39,11 @@ printf '1\n2\n3\n4\n5\n' | awk '$1 % 2 == 0 { s += $1 } END { print s }'
 [ ENTER | CTRL-C ]
 ```
 
-To perform its job the command sends a query to a v1 completions-compatible LLM API to generate a script to do the requested task.
-The remote model only has access to the request and the provided data, and the generated script must solve the requested task
-as a one-shot operation, without going back to the model again. The request may require reading local content, but if you do
-not explicitly provide the content, the model must construct the script to access the required content and autonomously
+To perform its job the command sends a query to a v1 completions-compatible LLM API to generate a script to do the
+requested task. The remote model only has access to the stdin and command line argument text you provide
+(e.g. the _filename_, not the _content_), and the generated script must then solve the requested task as a one-shot
+operation, without going back to the model again. The request may require reading local content, but if you do not
+explicitly provide the content, the model must construct the script to access the required content and autonomously
 solve the task locally during the script execution.
 
 ```
@@ -57,6 +58,8 @@ $ now "how many users are in this system" /chroot/passwd
 wc -l < /chroot/passwd
 [ ENTER | CTRL-C ]
 ```
+Again, in the case above, all the model got was `/chroot/passwd`, not its data, and that was enough for the model to
+infer that the generated script should look into it to solve the request.
 
 
 ## Usage
@@ -109,7 +112,7 @@ If you run _now_ without a valid configuration, it will propose a script for cre
 
 ### Recommended models
 
-All the testing and examples were done with _Qwen 3.8 27B NVFP4_ running locally, but any model that does well on terminal benchmarks will do well writing scripts.
+All the testing and examples were done with _Qwen 3.8 27B Q4_ running locally, but any model that does well on terminal benchmarks will do well writing scripts.
 
 ## Arguments and the standard input
 
@@ -404,7 +407,9 @@ done
 hi
 ```
 
-### Python scripts on-the-fly
+### Running verified Python scripts
+
+Python also reads from stdin, to make things more complex.
 
 ```
 $ echo 9 | python3 -c "$(now 'print a py program that prints the sqrt of the number from stdin')"
@@ -438,8 +443,12 @@ download.sh --source="$1" --output="$2"
 
 ### External JavaScript API
 
-The app is in development so the model has no way of knowing it yet, but the tool
-is documenting its own API via `--help` and `$HELP_FOR_AGENT`.
+In this case not only the model is generating the script for a command that the
+model has not seen before, but it's also generating the JavaScript query that is
+fed into the command, also with an API it hasn't seen before. Both the command
+arguments and the JavaScript API are discovered via `--help`, and the tool is
+providing a more extensive help than a human would get by checking `$HELP_FOR_AGENT`
+which _now_ sets everytime it runs `--help`.
 
 ```
 $ now -c any-store-cli2 "how many readers live in Berlin" library.db
