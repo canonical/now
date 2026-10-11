@@ -78,8 +78,75 @@ func TestParseStdinRequest(t *testing.T) {
 	assertEqual(t, "Request", opts.Request, "rename these files\nlike set 2")
 
 	_, err := cli.Parse([]string{"-", "a.txt"}, strings.NewReader(""))
-	if err == nil || !strings.Contains(err.Error(), "empty request on stdin") {
+	if err == nil || !strings.Contains(err.Error(), "empty request from stdin") {
 		t.Fatalf("expected empty stdin error, got %v", err)
+	}
+}
+
+// writePromptFile creates a temp file with the given content and returns
+// its path.
+func writePromptFile(t *testing.T, content string) string {
+	t.Helper()
+	path := filepath.Join(t.TempDir(), "prompt.txt")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("cannot write prompt file: %v", err)
+	}
+	return path
+}
+
+func TestParsePromptFile(t *testing.T) {
+	path := writePromptFile(t, "the request")
+
+	// The request comes from the file; every positional is data.
+	opts := mustParse(t, []string{"-p", path, "a.txt", "b.txt"})
+	assertEqual(t, "Request", opts.Request, "the request")
+	assertEqual(t, "Args", opts.Args, []string{"a.txt", "b.txt"})
+
+	// The =-form works, and no positionals is fine.
+	opts = mustParse(t, []string{"-p=" + path})
+	assertEqual(t, "Request", opts.Request, "the request")
+	assertEqual(t, "Args", opts.Args, []string(nil))
+
+	// Content is verbatim: empty lines and formatting are preserved.
+	opts = mustParse(t, []string{"-p", path, "a.txt"})
+	assertEqual(t, "Request", opts.Request, "the request")
+}
+
+func TestParsePromptFileVerbatim(t *testing.T) {
+	path := writePromptFile(t, "line one\n\nline two\n")
+	opts := mustParse(t, []string{"-p", path})
+	assertEqual(t, "Request", opts.Request, "line one\n\nline two\n")
+}
+
+func TestParsePromptFileWithStdinArgs(t *testing.T) {
+	// With -p, "-" as an argument still feeds args from stdin; stdin
+	// is otherwise left free for the script.
+	path := writePromptFile(t, "the request")
+	opts := mustParseStdin(t, []string{"-p", path, "-", "a.txt"}, "s1.txt\n\ns2.txt\n")
+	assertEqual(t, "Request", opts.Request, "the request")
+	assertEqual(t, "Args", opts.Args, []string{"s1.txt", "s2.txt", "a.txt"})
+}
+
+func TestParsePromptFileErrors(t *testing.T) {
+	// Missing file.
+	_, err := cli.Parse([]string{"-p", filepath.Join(t.TempDir(), "nope.txt")}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "cannot read") {
+		t.Fatalf("expected missing-file error, got %v", err)
+	}
+
+	// Empty and whitespace-only files are empty requests.
+	for _, content := range []string{"", "\n  \n\t\n"} {
+		path := writePromptFile(t, content)
+		_, err := cli.Parse([]string{"-p", path}, strings.NewReader(""))
+		if err == nil || !strings.Contains(err.Error(), "empty request from file") {
+			t.Fatalf("expected empty-request error for %q, got %v", content, err)
+		}
+	}
+
+	// -p without a value.
+	_, err = cli.Parse([]string{"-p"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "-p requires a file path") {
+		t.Fatalf("expected missing-value error, got %v", err)
 	}
 }
 
@@ -555,4 +622,3 @@ func TestParseOutputMissingValue(t *testing.T) {
 		t.Fatalf("got %v, want -o requires", err)
 	}
 }
-

@@ -70,9 +70,10 @@ Usage:
   now [options] "<request>" [<arg> ...]
 
 Options:
-  <request>         Natural language request.
+  <request>         Natural language requesteques.
   <arg>             Data made available to the model and script, ordered.
   -                 Read either the request or the arguments from stdin.
+  -p <path>         Read the request from the prompt text file.
 
 Running control:
   -y                Auto-approve the generated script without asking.
@@ -391,7 +392,8 @@ mv bar/three.txt bar/3.txt
 
 ### Interactive scripts
 
-Scripts have access to stdin as well, as long as `-` isn't used as an argument to input request data.
+Scripts have access to stdin as well, as long as `-` isn't used as an argument to input request data
+(use `-p <path>` as an alternative for the request prompt).
 
 ```
 $ now -c python3 "in a loop, ask for a line, run it on python, repeat"
@@ -463,7 +465,7 @@ any-store-cli2 library.db -e 'db.readers.find({"city":"Berlin"}).count()'
 ```
 $ now --help 2>&1 | now -f txt "why would I use this, in few words?" -
 You use `now` when you want to turn a natural-language sentence into a
-small, reviewable shell script that runs in a sandbox — one-shot, no
+small, reviewable shell script that runs in a sandbox - one-shot, no
 multi-turn LLM, no hidden tool calls. You see the script before it
 executes, and busybox + sandbox flags keep it from touching anything
 you haven't explicitly allowed.

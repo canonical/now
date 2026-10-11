@@ -1,6 +1,6 @@
 # Preface
 
-This document records the design of `internal/cli` and `cmd/now` — the
+This document records the design of `internal/cli` and `cmd/now` - the
 flag grammar, the approval flow, the stream discipline, and the full
 cycle that threads every subsystem together. The emphasis is on
 decisions and discussions that the code cannot show.
@@ -13,7 +13,7 @@ Read the top-level `.kb/agents.md` file before continuing below.
 The CLI is the orchestrator and the only policy-maker in the project:
 it parses the command line, loads configuration, resolves busybox,
 probes confinement, generates the script, **owns the approval step**,
-and executes. Every other package is mechanical — the division of labor
+and executes. Every other package is mechanical - the division of labor
 is deliberate (see `.kb/engine.md` for the engine side of that split).
 `cli.Run(RunOptions)` performs the full cycle; `cmd/now/main.go` is a
 four-line dispatcher that hands it the real streams.
@@ -25,7 +25,7 @@ four-line dispatcher that hands it the real streams.
   generated script's output goes to stdout so it can be piped; the
   script-for-review, approval prompts, and all errors go to stderr.
   This was decided after an earlier design printed the script to
-  stdout and switched behavior on whether stdout was a terminal —
+  stdout and switched behavior on whether stdout was a terminal -
   rejected as embedding CLI policy in the wrong place and for
   breaking the pipe use case (script output had to be separated from
   the review text).
@@ -33,17 +33,17 @@ four-line dispatcher that hands it the real streams.
   placeholder consumes it); the approval question goes to the
   controlling terminal so both can coexist. This fixed a real bug:
   `cat file | now "explain this" -` drained stdin during parsing and
-  the approval read then saw EOF — which, worse, silently read as an
+  the approval read then saw EOF - which, worse, silently read as an
   empty line and auto-approved.
 - **No terminal and no `-y`/`-q` is an error, not a skip.** "We had to
-  approve but cannot" — exit 1 with `cannot ask for approval without
+  approve but cannot" - exit 1 with `cannot ask for approval without
   a terminal`, rather than guessing the user's intent.
 - **CTRL-C cancels cleanly in any phase**: `signal.NotifyContext` at
   `cli.Run` entry; the context threads through the API call
   (`http.NewRequestWithContext`), the approval wait (`select` on
   `ctx.Done()`), and execution (`exec.CommandContext`). Before this,
   only the approval phase handled the signal, and the semantics
-  changed per phase — documented as the "Signal handling" TODO item
+  changed per phase - documented as the "Signal handling" TODO item
   and resolved by threading context everywhere.
 - **Fail-fast ordering, all before the model call**: parse errors,
   missing commands (`-c`), missing grant paths (`-r`/`-w`), config
@@ -60,27 +60,27 @@ four-line dispatcher that hands it the real streams.
 
 Order matters and each step's position is a decision:
 
-1. `signal.NotifyContext` — the root context, from the entry point.
-2. `Parse(argv, stdin)` — flags and the request; `-h`/`--help` prints
+1. `signal.NotifyContext` - the root context, from the entry point.
+2. `Parse(argv, stdin)` - flags and the request; `-h`/`--help` prints
    usage and exits zero *here*, not in main.
-3. Setup load — `$HOME/.now` or the injected `SetupPath` (exists for
+3. Setup load - `$HOME/.now` or the injected `SetupPath` (exists for
    tests, which point it at a temp file with a fake API URL).
-4. **Write-mode branch** — when `-f`/`-o` selected a format, the cycle
+4. **Write-mode branch** - when `-f`/`-o` selected a format, the cycle
    diverges here and never reaches the run-mode steps below. See
    "Write mode" below.
-5. `busybox.Probe` — resolves path + applets; both the prompt (applet
+5. `busybox.Probe` - resolves path + applets; both the prompt (applet
    list) and the sandbox (binary path) consume the result, so it
    precedes both.
-6. Grant assembly + `sandbox.Probe` when confining — including adding
+6. Grant assembly + `sandbox.Probe` when confining - including adding
    the `-c` command paths to `Readable` (the `-c` implies `-r` rule;
-   note it applies *only when already confining* — `-c` alone never
+   note it applies *only when already confining* - `-c` alone never
    turns confinement on).
-7. `engine.Generate` — with `Complete` closing over the loaded setup
+7. `engine.Generate` - with `Complete` closing over the loaded setup
    options; this closure is the only place the completions package
    enters the cycle, keeping the engine decoupled (see
    `.kb/engine.md`).
-8. `Approve` — the CLI's own policy domain (below).
-9. `engine.Run` — only if approved; **not calling Run is the skip
+8. `Approve` - the CLI's own policy domain (below).
+9. `engine.Run` - only if approved; **not calling Run is the skip
    path**, there is no "don't run" flag to thread through.
 
 ## Write mode (-f / -o)
@@ -96,7 +96,7 @@ command surface.
 Format resolution, in `Parse` after flag parsing:
 
 - `-f` validates its value verbatim against `^[a-z0-9]+([.-][a-z0-9]+)*$`
-  (no lowercasing — uppercase is an error, not a fix). `"shell"` is a
+  (no lowercasing - uppercase is an error, not a fix). `"shell"` is a
   quiet, undocumented alias for `"sh"` (the only one; `"bash"` is not,
   as it implies a non-POSIX syntax). The alias is normalized in
   `setFormat` before validation, so all downstream `== "sh"` checks
@@ -113,7 +113,7 @@ Three modes branch in `cli.Run` on the resolved `Format`:
 
 - **Run mode** (`Format == ""`): the default cycle above.
 - **Write-script mode** (`Format == "sh"`): `busybox.Probe` still runs
-  (the applets feed the script prompt — the same code path as run
+  (the applets feed the script prompt - the same code path as run
   mode), then `engine.Generate`, then write. No sandbox probe, no
   Approve, no Run.
 - **Format mode** (`Format` other): `busybox.Probe` is skipped entirely
@@ -146,7 +146,7 @@ distinction:
 
 `cli.Run` sets `Output: true` only in `writeOutput` (the write-mode
 branch); the run-mode `engine.Generate` call leaves it at its zero
-value (`false`). The system message is unaffected by `Output` — a
+value (`false`). The system message is unaffected by `Output` - a
 dumped script still uses `busyboxPrompt` + `## ALLOWED COMMANDS` +
 `## REFERENCES` and the SCRIPT reply protocol, since the model still
 produces a script; only the user-message arg framing changes.
@@ -163,25 +163,35 @@ does not pre-`Stat` the file (it is being created). Success is silent.
   plain argument).
 - `-y` approve, `-q` approve-and-hide, `-t` trace, `-c cmd,...`,
   `-r path`, `-w path`, `-n` network, `-s` sandbox, `-f fmt`,
-  `-o file`. `=`-forms work for value-taking flags. Grants repeat and
+  `-o file`, `-p file` read request from a prompt text file.
+  `=`-forms work for value-taking flags. Grants repeat and
   accumulate.
 - Exactly one `-` placeholder in the whole invocation, either as the
   request (stdin lines joined with newlines; multi-line requests are a
-  feature — organizing a request with space is a primary use case,
+  feature - organizing a request with space is a primary use case,
   hence no line limit) or as an argument position (stdin lines
   injected there). Never both. Empty stdin as the request is an
   error; empty lines are dropped.
+- `-p <path>` is a third request source, mutually exclusive with the
+  request position: with `-p` there is no request positional, so every
+  positional is data and `-` remains available as an argument
+  placeholder. The file is read as a single blob, so its formatting
+  (blank lines, indentation) is preserved as given; stdin is read
+  line-by-line with empty lines dropped, in both the request and the
+  argument positions. The point of `-p` is that stdin stays free for
+  the script to consume at run time. Valid in write mode too; it only
+  selects the request source.
 - **History of dropped designs** (each was implemented or designed,
-  then removed — do not resurrect without discussing):
-  - Labeled path sets (`1: ... 2: ...`) — superseded when arguments
+  then removed - do not resurrect without discussing):
+  - Labeled path sets (`1: ... 2: ...`) - superseded when arguments
     became a flat, meaning-free list.
-  - `-x` trace — renamed to `-t` to free `-x` for a *possible future*
+  - `-x` trace - renamed to `-t` to free `-x` for a *possible future*
     execution-grant flag; bwrap cannot express execute-only binds
     today (see `.kb/sandbox.md`).
-  - `-w` commands — renamed to `-c`; `-w` now means writable grant.
-  - `-l` local mode (all writable, network off) — deleted as a
+  - `-w` commands - renamed to `-c`; `-w` now means writable grant.
+  - `-l` local mode (all writable, network off) - deleted as a
     redundant spelling of `-w /`.
-  - Usage on error — usage prints only on explicit `--help` or no
+  - Usage on error - usage prints only on explicit `--help` or no
     arguments; errors are one line, no appended usage.
 - `Options` is intentionally minimal; parser bookkeeping must not
   leak into it (stdin is handled inline during parsing).
@@ -193,7 +203,7 @@ successful run stays quiet. The buffer is a single internal
 `bytes.Buffer` serving as both the script's stdout and stderr.
 
 The approval output follows the same destination as the script
-output — `cli.Run` computes the writers (buffer or real) *before*
+output - `cli.Run` computes the writers (buffer or real) *before*
 calling `Approve`, so the review and the execution share one stream:
 
 - **`-b` alone**: script shown on real stderr, approval read from the
@@ -204,7 +214,7 @@ calling `Approve`, so the review and the execution share one stream:
 - **`-bq`**: Quiet suppresses the script and the separator; nothing
   is produced anywhere, and the buffer stays empty on success.
 - **`-y` (and `-by`)**: the `[ ENTER | CTRL-C ]` line always prints
-  to the selected output even though no question is asked — the
+  to the selected output even though no question is asked - the
   usual separation between the printed script and the output of the
   script. With `-b` it lands in the buffer; with plain `-y` on
   stderr. Quiet is the only mode that suppresses it.
@@ -216,34 +226,34 @@ only appears on failure.
 
 - `-q` hides the script entirely; otherwise the script prints on
   stderr before asking.
-- `-y`/`-q` approve without asking — including when stdout is a pipe.
+- `-y`/`-q` approve without asking - including when stdout is a pipe.
   (An earlier behavior keyed on stdout-not-a-terminal to *skip*
   execution; that entire notion was removed with the stdout/stderr
-  redesign — the terminal check now only decides *whether a question
+  redesign - the terminal check now only decides *whether a question
   can be asked*, and its absence is an error, not a mode.)
 - The question is printed to stderr; the answer is read from
-  `/dev/tty` (injectable as `ApprovalOptions.TTY` for tests — the
+  `/dev/tty` (injectable as `ApprovalOptions.TTY` for tests - the
   field exists because tests cannot open the real tty reliably, and
   it doubles as the seam that made interactive-path tests possible).
 - ENTER (empty line) approves; any other input cancels; EOF cancels
-  — explicitly distinguished from an empty line, because a drained
+  - explicitly distinguished from an empty line, because a drained
   tty reading EOF would otherwise auto-approve. The EOF-vs-empty-line
   bug was real and is pinned by `TestApproveEOFCancels`.
-- CTRL-C during the wait selects on `ctx.Done()` and cancels — the
+- CTRL-C during the wait selects on `ctx.Done()` and cancels - the
   line-reading goroutine is abandoned (bounded leak; the process is
   about to exit or move on).
 
 ## Testing design
 
 - The e2e tests run the whole cycle against the fake completions
-  server via a temp `SetupPath` — this exercises the real config
+  server via a temp `SetupPath` - this exercises the real config
   loading, not a stub.
 - `cmd/now` tests live in `package main` (not `_test`): they test the
   unexported `run`-era plumbing; the cycle itself moved to
   `cli.Run` where it is testable black-box.
 - Environment-dependent paths skip honestly: bwrap unavailability
   (`requireBwrap`), a controlling terminal existing (the no-terminal
-  approval tests skip when `/dev/tty` opens — in a devcontainer with a
+  approval tests skip when `/dev/tty` opens - in a devcontainer with a
   tty they cannot run, and would otherwise hang on the real tty).
 - The fake-bwrap/fake-LLM/fake-command patterns and the
   zero-API-request ordering assertions are shared infrastructure

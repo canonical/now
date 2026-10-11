@@ -18,8 +18,10 @@ package cli
 
 import (
 	"bufio"
+	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -34,6 +36,11 @@ type Options struct {
 	// Request is the natural language request that will be sent to the
 	// model for creating a script.
 	Request string
+
+	// PromptFile is the path of a file the request is read from, as
+	// an alternative to giving the request on the command line or on
+	// stdin. Set by -p; see PromptFile in the usage text.
+	PromptFile string
 
 	// Args holds the arguments provided after the request, in order.
 	Args []string
@@ -125,6 +132,7 @@ Options:
   <request>         Natural language request.
   <arg>             Data made available to the model and script, ordered.
   -                 Read either the request or the arguments from stdin.
+  -p <path>         Read the request from the prompt text file.
 
 Running control:
   -y                Auto-approve the generated script without asking.
@@ -161,9 +169,6 @@ func Parse(argv []string, stdin io.Reader) (*Options, error) {
 	if err := checkFormatConflicts(opts); err != nil {
 		return nil, err
 	}
-	if len(rest) == 0 {
-		return nil, parseErrf("missing request")
-	}
 
 	// Exactly one "-" placeholder is allowed, either as the request or as
 	// a path; stdin is read once and injected in its place.
@@ -176,22 +181,47 @@ func Parse(argv []string, stdin io.Reader) (*Options, error) {
 		return readStdin(stdin)
 	}
 
-	if rest[0] == "-" {
-		lines, err := readStdinOnce()
+	// The request comes either from the -p file or from the first
+	// positional; with -p there is no request positional, so every
+	// positional below is data. The file is read as a single blob,
+	// so its formatting is preserved as given; stdin is read
+	// line-by-line with empty lines dropped.
+	if opts.PromptFile != "" {
+		data, err := os.ReadFile(opts.PromptFile)
+		if err != nil {
+			if errors.Is(err, fs.ErrNotExist) {
+				return nil, parseErrf("cannot read %s: no such file or directory", opts.PromptFile)
+			}
+			return nil, parseErrf("cannot read %s: %v", opts.PromptFile, err)
+		}
+		if strings.TrimSpace(string(data)) == "" {
+			return nil, parseErrf("empty request from file: %s", opts.PromptFile)
+		}
+		opts.Request = string(data)
+	} else {
+		if len(rest) == 0 {
+			return nil, parseErrf("missing request")
+		}
+		if rest[0] == "-" {
+			lines, err := readStdinOnce()
 			if err != nil {
-			return nil, err
-		}
+				return nil, err
+			}
 			if len(lines) == 0 {
-			return nil, parseErrf("empty request on stdin")
+				return nil, parseErrf("empty request from stdin")
+			}
+			rest[0] = strings.Join(lines, "\n")
 		}
-		rest[0] = strings.Join(lines, "\n")
-	}
-	opts.Request = rest[0]
-	if strings.TrimSpace(opts.Request) == "" {
-		return nil, parseErrf("empty request")
+		opts.Request = rest[0]
+		if strings.TrimSpace(opts.Request) == "" {
+			return nil, parseErrf("empty request")
+		}
+		rest = rest[1:]
 	}
 
-	for _, arg := range rest[1:] {
+	// The remaining positionals are data; a "-" placeholder injects
+	// the stdin lines in its place.
+	for _, arg := range rest {
 		if arg == "-" {
 			lines, err := readStdinOnce()
 			if err != nil {
@@ -216,7 +246,7 @@ func readStdin(r io.Reader) ([]string, error) {
 		}
 	}
 	if err := sc.Err(); err != nil {
-			return nil, parseErrf("cannot read stdin: %v", err)
+		return nil, parseErrf("cannot read stdin: %v", err)
 	}
 	return lines, nil
 }
@@ -292,6 +322,14 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 			opts.Output = argv[i]
 		case strings.HasPrefix(arg, "-o="):
 			opts.Output = strings.TrimPrefix(arg, "-o=")
+		case arg == "-p":
+			if i+1 >= len(argv) {
+				return nil, parseErrf("-p requires a file path")
+			}
+			i++
+			opts.PromptFile = argv[i]
+		case strings.HasPrefix(arg, "-p="):
+			opts.PromptFile = strings.TrimPrefix(arg, "-p=")
 		case len(arg) > 1 && arg[0] == '-' && strings.TrimRight(arg, "abcdefghijklmnopqrstuvwxyz") == "-":
 			for _, flag := range arg[1:] {
 				switch flag {
@@ -468,5 +506,3 @@ func findCommand(name string) (prompt.Command, error) {
 type HelpRequested struct{}
 
 func (*HelpRequested) Error() string { return usage }
-
-
