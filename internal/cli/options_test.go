@@ -150,6 +150,81 @@ func TestParsePromptFileErrors(t *testing.T) {
 	}
 }
 
+func TestParseInputs(t *testing.T) {
+	dir := t.TempDir()
+	path1 := filepath.Join(dir, "one.txt")
+	path2 := filepath.Join(dir, "two.txt")
+	if err := os.WriteFile(path1, []byte("first\nfile\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path2, []byte("second file"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Files are recorded in order, under the path as given, with
+	// the content read as a blob. They are not data args.
+	opts := mustParse(t, []string{"-i", path1, "q", "a.txt"})
+	assertEqual(t, "Args", opts.Args, []string{"a.txt"})
+	opts = mustParse(t, []string{"-i", path1, "-i", path2, "q", "a.txt"})
+	assertEqual(t, "Inputs[0]", opts.Inputs[0], prompt.Input{Name: path1, Data: "first\nfile\n"})
+	assertEqual(t, "Inputs[1]", opts.Inputs[1], prompt.Input{Name: path2, Data: "second file"})
+	assertEqual(t, "Args", opts.Args, []string{"a.txt"})
+
+	// The =-form works too.
+	opts = mustParse(t, []string{"-i=" + path1, "q", "a.txt"})
+	assertEqual(t, "Inputs", opts.Inputs, []prompt.Input{{Name: path1, Data: "first\nfile\n"}})
+	assertEqual(t, "Args", opts.Args, []string{"a.txt"})
+
+	// A relative path is kept verbatim as the name, like -p.
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	opts = mustParse(t, []string{"-i", "one.txt", "q"})
+	assertEqual(t, "Inputs[0].Name", opts.Inputs[0].Name, "one.txt")
+}
+
+func TestParseInputErrors(t *testing.T) {
+	dir := t.TempDir()
+
+	// Missing file.
+	_, err := cli.Parse([]string{"-i", filepath.Join(dir, "nope.txt"), "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), `cannot read "`) || !strings.Contains(err.Error(), "file not found") {
+		t.Fatalf("expected missing-file error, got %v", err)
+	}
+
+	// -i without a value.
+	_, err = cli.Parse([]string{"-i"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "-i requires a file path") {
+		t.Fatalf("expected missing-value error, got %v", err)
+	}
+
+	// Non-UTF-8 content is rejected.
+	bad := filepath.Join(dir, "bad.bin")
+	if err := os.WriteFile(bad, []byte("\xff\xfe"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = cli.Parse([]string{"-i", bad, "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "not valid UTF-8") {
+		t.Fatalf("expected non-UTF-8 error, got %v", err)
+	}
+
+	// Content larger than 16k is rejected.
+	big := filepath.Join(dir, "big.txt")
+	if err := os.WriteFile(big, make([]byte, 16<<10+1), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	_, err = cli.Parse([]string{"-i", big, "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "larger than 16k") {
+		t.Fatalf("expected oversize error, got %v", err)
+	}
+
+	// A directory is rejected by name, not by a misleading read error.
+	_, err = cli.Parse([]string{"-i", dir, "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "it is a directory") {
+		t.Fatalf("expected directory error, got %v", err)
+	}
+}
+
 // withFakeCommands puts a temp dir with fake commands on $PATH for the
 // test. Each fake prints a fixed --help line.
 func withFakeCommands(t *testing.T, names ...string) {

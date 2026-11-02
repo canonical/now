@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"context"
+
 	"github.com/canonical/now/internal/api/completions"
 	"github.com/canonical/now/internal/engine"
 	"github.com/canonical/now/internal/prompt"
@@ -261,7 +262,7 @@ func TestGenerateOutputDropsArgAt(t *testing.T) {
 	if strings.Contains(user, "$@") {
 		t.Errorf("dumped script user message should not mention $@: %q", user)
 	}
-	if !strings.Contains(user, "## DATA\n```\na.txt\n```") {
+	if !strings.Contains(user, "## REQUEST DATA\n1:a.txt\n") {
 		t.Errorf("dumped script user message should carry plain data: %q", user)
 	}
 }

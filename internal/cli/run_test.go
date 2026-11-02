@@ -127,7 +127,7 @@ func TestRunBufferedHidesSuccess(t *testing.T) {
 
 func TestRunBufferedAloneShowsReview(t *testing.T) {
 	// -b alone: the script review and the ENTER separator go to the
-	// real stderr — the user cannot approve a script they cannot see —
+	// real stderr - the user cannot approve a script they cannot see -
 	// and only the execution output is buffered.
 	f := completions.NewFakeLLM("---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
 	url, err := f.Start()
@@ -187,7 +187,7 @@ func TestRunNoTerminalRejects(t *testing.T) {
 }
 
 func TestRunTrace(t *testing.T) {
-	// -x threads through to the executed script: commands are traced
+	// -t threads through to the executed script: commands are traced
 	// to stderr, stdout still gets only the script's output.
 	stdout, stderr, err := e2e(t, []string{"-y", "-t", "do something"}, "---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
 	if err != nil {
@@ -196,6 +196,64 @@ func TestRunTrace(t *testing.T) {
 	assertEqual(t, "stdout", stdout, "hello\n")
 	if !strings.Contains(stderr, "+ echo hello") {
 		t.Errorf("missing trace in stderr: %q", stderr)
+	}
+}
+
+func TestRunInputs(t *testing.T) {
+	// The -i files are read at parse time and reach the model as
+	// FILE attachments, in flag order, before the request.
+	f := completions.NewFakeLLM("---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
+	url, err := f.Start()
+	if err != nil {
+		t.Fatalf("cannot start fake: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Stop() })
+
+	setupPath := filepath.Join(t.TempDir(), ".now")
+	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\napi-model=test\n"), 0o600); err != nil {
+		t.Fatalf("cannot write setup: %v", err)
+	}
+
+	file1 := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(file1, []byte("alpha\nbeta\n"), 0o644); err != nil {
+		t.Fatalf("cannot write input file: %v", err)
+	}
+	file2 := filepath.Join(t.TempDir(), "extra.txt")
+	if err := os.WriteFile(file2, []byte("only line"), 0o644); err != nil {
+		t.Fatalf("cannot write input file: %v", err)
+	}
+
+	var stdout, stderr strings.Builder
+	err = cli.Run(context.Background(), cli.RunOptions{
+		Argv:      []string{"-y", "-i", file1, "-i", file2, "grep something"},
+		Stdin:     strings.NewReader(""),
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		SetupPath: setupPath,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", stdout.String(), "hello\n")
+
+	req := f.LastRequest()
+	if req == nil {
+		t.Fatalf("no request recorded")
+	}
+	messages, _ := req["messages"].([]any)
+	if len(messages) != 2 {
+		t.Fatalf("len(messages) = %d, want 2", len(messages))
+	}
+	user, _ := messages[1].(map[string]any)["content"].(string)
+	note := "Any \uFFFD replaces non-printable characters in the references below.\n"
+	fileNote := "The up-to-date file body is inlined above with lines numbered as in `grep -n`: N:LITERAL where N is the line number.\n"
+	want := "## ATTACHMENTS\n" + note +
+		"\n### FILE: " + file1 + "\n1:alpha\n2:beta\n" +
+		"---\n" + fileNote +
+		"\n### FILE: " + file2 + "\n1:only line\n" +
+		"---\n" + fileNote
+	if !strings.Contains(user, want) {
+		t.Errorf("user message missing the attached files: %q", user)
 	}
 }
 
@@ -230,7 +288,7 @@ func TestRunScriptReadsStdin(t *testing.T) {
 
 func TestRunDashDrainsStdin(t *testing.T) {
 	// With "-", Parse drains stdin to EOF into "$@"; the script
-	// sees the data as arguments, and its stdin is at EOF — a read
+	// sees the data as arguments, and its stdin is at EOF - a read
 	// fails honestly under -e rather than re-reading consumed data.
 	f := completions.NewFakeLLM("---SCRIPT-START---\nfor a in \"$@\"; do echo \"arg: $a\"; done\n---SCRIPT-END---\n")
 	url, err := f.Start()
@@ -499,7 +557,7 @@ func TestRunFormatShArgsAreData(t *testing.T) {
 	if strings.Contains(user, "$@") {
 		t.Errorf("dumped script should not mention $@: %q", user)
 	}
-	if !strings.Contains(user, "## DATA\n```\na.txt\nb.txt\n```") {
+	if !strings.Contains(user, "## REQUEST DATA\n1:a.txt\n2:b.txt\n") {
 		t.Errorf("dumped script should carry plain data: %q", user)
 	}
 }
@@ -526,6 +584,51 @@ func TestRunSampleConfigNotOfferedUnattended(t *testing.T) {
 	}
 	if _, err2 := os.Stat(filepath.Join(home, ".now")); !os.IsNotExist(err2) {
 		t.Errorf("sample written despite -y")
+	}
+}
+
+func TestRunInputsDoNotEnforceSandbox(t *testing.T) {
+	// -i alone leaves confinement off, like the request data it
+	// resembles: no bwrap probe happens, so a broken bwrap on $PATH
+	// is never reached and the model call goes through.
+	f := completions.NewFakeLLM("---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
+	url, err := f.Start()
+	if err != nil {
+		t.Fatalf("cannot start fake: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Stop() })
+
+	setupPath := filepath.Join(t.TempDir(), ".now")
+	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\napi-model=test\n"), 0o600); err != nil {
+		t.Fatalf("cannot write setup: %v", err)
+	}
+
+	file := filepath.Join(t.TempDir(), "notes.txt")
+	if err := os.WriteFile(file, []byte("alpha\n"), 0o644); err != nil {
+		t.Fatalf("cannot write input file: %v", err)
+	}
+
+	binDir := t.TempDir()
+	bwrap := filepath.Join(binDir, "bwrap")
+	if err := os.WriteFile(bwrap, []byte("#!/bin/sh\nexit 1\n"), 0o755); err != nil {
+		t.Fatalf("cannot write bwrap: %v", err)
+	}
+	t.Setenv("PATH", binDir+":"+os.Getenv("PATH"))
+
+	var stdout, stderr strings.Builder
+	err = cli.Run(context.Background(), cli.RunOptions{
+		Argv:      []string{"-y", "-i", file, "grep something"},
+		Stdin:     strings.NewReader(""),
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		SetupPath: setupPath,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", stdout.String(), "hello\n")
+	if got := len(f.Requests()); got != 1 {
+		t.Fatalf("model was called %d times, want 1", got)
 	}
 }
 

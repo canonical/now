@@ -150,11 +150,15 @@ func Run(ctx context.Context, opts RunOptions) error {
 	if sandboxOn {
 		// The allowed commands are granted readable so their binaries
 		// are bound inside the sandbox, and their loader directories
-		// are discovered by the probe.
+		// are discovered by the probe. The -i files are granted too,
+		// since the prompt names them as readable paths.
 		var cmdPaths []string
 		for _, c := range parsed.Commands {
 			grants.Readable = append(grants.Readable, c.Path)
 			cmdPaths = append(cmdPaths, c.Path)
+		}
+		for _, in := range parsed.Inputs {
+			grants.Readable = append(grants.Readable, absPath(in.Name))
 		}
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -184,6 +188,7 @@ func Run(ctx context.Context, opts RunOptions) error {
 			Request:  parsed.Request,
 			Args:     parsed.Args,
 			Commands: parsed.Commands,
+			Inputs:   parsed.Inputs,
 			Busybox:  busyOpts,
 			Complete: func(ctx context.Context, messages []prompt.Message) (string, error) {
 				return completions.Complete(ctx, *setupOpts, messages)
@@ -279,6 +284,7 @@ func writeOutput(ctx context.Context, w writeOptions) error {
 		Request:  parsed.Request,
 		Args:     parsed.Args,
 		Commands: parsed.Commands,
+		Inputs:   parsed.Inputs,
 		Busybox:  busyOpts,
 		Format:   parsed.Format,
 		Output:   true,

@@ -43,9 +43,9 @@ func TestBuildWithArgs(t *testing.T) {
 		Request: "rename these",
 		Args:    []string{"a.txt", "b.txt"},
 	})
-	want := "## REQUEST\nrename these\n\n## \"$@\"\n```\n$1 | a.txt\n$2 | b.txt\n```\n" +
-		"EVERY LINE above the LITERAL string in the respective index in \"$@\". " +
-		"Your job is to INFER what the data means BASED ON THE REQUEST and generate the script to SOLVE THE REQUEST.\n" +
+	want := "## REQUEST\nrename these\n\n## REQUEST DATA IN \"$@\"\n1:a.txt\n2:b.txt\n---\n" +
+		"The REQUEST DATA is inline above with lines numbered as in `grep -n`: N:LITERAL where N the line number and index in \"$@\" (and $1, $2, etc). " +
+		"Your job is to INFER what the data means BASED ON THE REQUEST and ATTACHMENTS and generate the script to SOLVE THE REQUEST.\n" +
 		"You may use \"$@\", $1, $2, etc, or the literal strings. Prefer STRING LITERALS rather than variables for SIMPLE cases.\n"
 	assertEqual(t, "user content", msg[1].Content, want)
 }
@@ -60,8 +60,8 @@ func TestBuildScriptOutputDropsArgAt(t *testing.T) {
 		Format:  "sh",
 		Output:  true,
 	})
-	want := "## REQUEST\nrename these\n\n## DATA\n```\na.txt\nb.txt\n```\n" +
-		"EVERY LINE above is the LITERAL string in the data. " +
+	want := "## REQUEST\nrename these\n\n## REQUEST DATA\n1:a.txt\n2:b.txt\n---\n" +
+		"The REQUEST DATA is inline above with lines numbered as in `grep -n`: N:LITERAL where N the line number. " +
 		"Your job is to INFER what the data means BASED ON THE REQUEST and generate the script to SOLVE THE REQUEST.\n" +
 		"If you need any of this data in the script you must put it there yourself.\n"
 	assertEqual(t, "user content", msgs[1].Content, want)
@@ -90,7 +90,7 @@ func TestBuildArgSanitization(t *testing.T) {
 	// Printable arguments, including non-ASCII, pass through; unprintable
 	// characters are replaced by the replacement rune, and the note tells
 	// the model the real strings are in "$@".
-	want := "## \"$@\"\n```\n$1 | plain.txt\n$2 | with\uFFFDtab\n$3 | with\uFFFDnewline\n$4 | héllo\n```\n"
+	want := "## REQUEST DATA IN \"$@\"\n1:plain.txt\n2:with\uFFFDtab\n3:with\uFFFDnewline\n4:héllo\n---\n"
 	if !strings.Contains(msgs[1].Content, want) {
 		t.Errorf("data section = %q, want to contain %q", msgs[1].Content, want)
 	}
@@ -99,8 +99,95 @@ func TestBuildArgSanitization(t *testing.T) {
 	}
 }
 
-func TestBuildWithCommands(t *testing.T) {
+func TestBuildInputFiles(t *testing.T) {
+	opts := prompt.BuildOptions{
+		Request: "rename these",
+		Inputs: []prompt.Input{
+			{Name: "a.txt", Data: "first\n\nsecond\n"},
+			{Name: "b.txt", Data: "only line"}, // no trailing newline
+		},
+		Args: []string{"x.txt"},
+	}
+
+	// The -i files join the -c command help in the user message's
+	// ATTACHMENTS section, which comes before the REQUEST. Each file is
+	// headed as "### FILE: <path>", every line numbered like REQUEST
+	// DATA, and closed by the grep -n footer note.
+	msgs := prompt.Build(opts)
+	note := "Any \uFFFD replaces non-printable characters in the references below.\n"
+	fileNote := "The up-to-date file body is inlined above with lines numbered as in `grep -n`: N:LITERAL where N is the line number.\n"
+	want := "## ATTACHMENTS\n" + note +
+		"\n### FILE: a.txt\n1:first\n2:\n3:second\n" +
+		"---\n" + fileNote +
+		"\n### FILE: b.txt\n1:only line\n" +
+		"---\n" + fileNote +
+		"\n## REQUEST\nrename these\n"
+	if !strings.Contains(msgs[1].Content, want) {
+		t.Errorf("user content = %q, want to contain %q", msgs[1].Content, want)
+	}
+	if strings.Contains(msgs[0].Content, "## ATTACHMENTS") {
+		t.Errorf("system message should not have an ATTACHMENTS section: %q", msgs[0].Content)
+	}
+
+	// Unprintable characters within a line are replaced like in
+	// REQUEST DATA; the header note announces it.
+	opts.Inputs = []prompt.Input{{Name: "a.txt", Data: "hello\tworld\n"}}
+	msgs = prompt.Build(opts)
+	if !strings.Contains(msgs[1].Content, "### FILE: a.txt\n1:hello\uFFFDworld\n") {
+		t.Errorf("sanitized content not found: %q", msgs[1].Content)
+	}
+	if !strings.Contains(msgs[1].Content, note) {
+		t.Errorf("missing sanitization note: %q", msgs[1].Content)
+	}
+}
+
+func TestBuildInputsWithRequestData(t *testing.T) {
+	// Execute mode with both -i files and args: the user message
+	// carries ATTACHMENTS, then REQUEST, then the "$@" data block,
+	// in that order.
 	msgs := prompt.Build(prompt.BuildOptions{
+		Request: "rename these",
+		Inputs:  []prompt.Input{{Name: "a.txt", Data: "first\n\nsecond\n"}},
+		Args:    []string{"x.txt"},
+	})
+	note := "Any \uFFFD replaces non-printable characters in the references below.\n"
+	fileNote := "The up-to-date file body is inlined above with lines numbered as in `grep -n`: N:LITERAL where N is the line number.\n"
+	want := "## ATTACHMENTS\n" + note +
+		"\n### FILE: a.txt\n1:first\n2:\n3:second\n" +
+		"---\n" + fileNote +
+		"\n## REQUEST\nrename these\n" +
+		"\n## REQUEST DATA IN \"$@\"\n1:x.txt\n---\n"
+	if !strings.Contains(msgs[1].Content, want) {
+		t.Errorf("user content = %q, want to contain %q", msgs[1].Content, want)
+	}
+}
+
+func TestBuildInputsFormatMode(t *testing.T) {
+	// Format mode with -i files and args: the same ATTACHMENTS section
+	// leads the user message, the data block uses the numbered dump
+	// framing, and the system message has no attachment section.
+	msgs := prompt.Build(prompt.BuildOptions{
+		Request: "summarize this",
+		Format:  "md",
+		Inputs:  []prompt.Input{{Name: "a.txt", Data: "content\n"}},
+		Args:    []string{"x.md"},
+	})
+	note := "Any \uFFFD replaces non-printable characters in the references below.\n"
+	fileNote := "The up-to-date file body is inlined above with lines numbered as in `grep -n`: N:LITERAL where N is the line number.\n"
+	want := "## ATTACHMENTS\n" + note + "\n### FILE: a.txt\n1:content\n" +
+		"---\n" + fileNote +
+		"\n## REQUEST\nsummarize this\n" +
+		"\n## REQUEST DATA\n1:x.md\n---\n"
+	if !strings.Contains(msgs[1].Content, want) {
+		t.Errorf("user content = %q, want to contain %q", msgs[1].Content, want)
+	}
+	if strings.Contains(msgs[0].Content, "## ATTACHMENTS") {
+		t.Errorf("system message should not have an ATTACHMENTS section: %q", msgs[0].Content)
+	}
+}
+
+func TestBuildWithCommands(t *testing.T) {
+	msg := prompt.Build(prompt.BuildOptions{
 		Request: "fetch it",
 		Args:    []string{"http://x/data.txt"},
 		Commands: []prompt.Command{
@@ -108,20 +195,27 @@ func TestBuildWithCommands(t *testing.T) {
 			{Name: "jq", Help: "jq usage:\n  jq filter"},
 		},
 	})
-	if !strings.Contains(msgs[0].Content, "## ALLOWED COMMANDS\ncurl jq\n") {
-		t.Errorf("missing allowed commands section: %q", msgs[0].Content)
+	user := msg[1].Content
+	if !strings.Contains(msg[0].Content, "## ALLOWED COMMANDS\ncurl jq\n") {
+		t.Errorf("missing allowed commands section: %q", msg[0].Content)
 	}
-	if !strings.Contains(msgs[0].Content, "## REFERENCES\n\n### curl --help\ncurl usage:\n  curl [options] URL") {
-		t.Errorf("missing curl help: %q", msgs[0].Content)
+	note := "Any \uFFFD replaces non-printable characters in the references below.\n"
+	if !strings.Contains(user, "## ATTACHMENTS\n"+note+"\n### OUTPUT: curl --help\ncurl usage:\n  curl [options] URL") {
+		t.Errorf("missing curl help: %q", user)
 	}
-	if !strings.Contains(msgs[0].Content, "### jq --help\njq usage:\n  jq filter") {
-		t.Errorf("missing jq help: %q", msgs[0].Content)
+	if !strings.Contains(user, "\n### OUTPUT: jq --help\njq usage:\n  jq filter") {
+		t.Errorf("missing jq help: %q", user)
+	}
+	// The section precedes the request.
+	if strings.Index(user, "## ATTACHMENTS") > strings.Index(user, "## REQUEST\n") {
+		t.Errorf("attachments should come before the request: %q", user)
 	}
 }
 
 func TestBuildReferencesSection(t *testing.T) {
-	// With two commands, there is a single REFERENCES section holding
-	// one subsection per command, in order.
+	// The command-help parts of the ATTACHMENTS section; the function
+	// name predates the rename. One HELP subsection per command, in
+	// order, before the REQUEST.
 	msgs := prompt.Build(prompt.BuildOptions{
 		Request: "fetch it",
 		Commands: []prompt.Command{
@@ -129,12 +223,13 @@ func TestBuildReferencesSection(t *testing.T) {
 			{Name: "jq", Help: "jq usage:\n  jq filter"},
 		},
 	})
-	start := strings.Index(msgs[0].Content, "\n\n## REFERENCES\n\n### curl --help")
+	note := "Any \uFFFD replaces non-printable characters in the references below.\n"
+	start := strings.Index(msgs[1].Content, "## ATTACHMENTS\n"+note+"\n### OUTPUT: curl --help")
 	if start < 0 {
-		t.Fatalf("REFERENCES section not found: %q", msgs[0].Content)
+		t.Fatalf("ATTACHMENTS section not found: %q", msgs[1].Content)
 	}
-	assertEqual(t, "references", msgs[0].Content[start:], "\n\n## REFERENCES\n\n### curl --help\ncurl usage:\n  curl [options] URL"+
-		"\n### jq --help\njq usage:\n  jq filter")
+	assertEqual(t, "references", msgs[1].Content[start:], "## ATTACHMENTS\n"+note+"\n### OUTPUT: curl --help\ncurl usage:\n  curl [options] URL\n"+
+		"\n### OUTPUT: jq --help\njq usage:\n  jq filter\n\n## REQUEST\nfetch it\n")
 }
 
 func TestBuildWithoutCommands(t *testing.T) {
@@ -144,7 +239,7 @@ func TestBuildWithoutCommands(t *testing.T) {
 	if !strings.Contains(msgs[0].Content, "## ALLOWED COMMANDS\n") {
 		t.Errorf("missing allowed commands section: %q", msgs[0].Content)
 	}
-	if strings.Contains(msgs[0].Content, "## REFERENCES") {
+	if strings.Contains(msgs[0].Content, "## ATTACHMENTS") {
 		t.Errorf("unexpected help section: %q", msgs[0].Content)
 	}
 }
@@ -162,12 +257,12 @@ func TestBuildCommandWithoutHelp(t *testing.T) {
 	if !strings.Contains(msgs[0].Content, "## ALLOWED COMMANDS\ncurl nohelputil jq\n") {
 		t.Errorf("missing allowed commands entry: %q", msgs[0].Content)
 	}
-	if strings.Contains(msgs[0].Content, "nohelputil --help") {
-		t.Errorf("unexpected reference for help-less command: %q", msgs[0].Content)
+	if strings.Contains(msgs[1].Content, "nohelputil --help") {
+		t.Errorf("unexpected reference for help-less command: %q", msgs[1].Content)
 	}
-	if !strings.Contains(msgs[0].Content, "### curl --help") ||
-		!strings.Contains(msgs[0].Content, "### jq --help") {
-		t.Errorf("missing other references: %q", msgs[0].Content)
+	if !strings.Contains(msgs[1].Content, "### OUTPUT: curl --help") ||
+		!strings.Contains(msgs[1].Content, "### OUTPUT: jq --help") {
+		t.Errorf("missing other references: %q", msgs[1].Content)
 	}
 }
 
@@ -250,7 +345,7 @@ func TestBuildFormatUserMessageDropsArgNote(t *testing.T) {
 	if strings.Contains(msgs[1].Content, "$@") {
 		t.Errorf("format user message should not mention $@: %q", msgs[1].Content)
 	}
-	if !strings.Contains(msgs[1].Content, "## DATA") {
+	if !strings.Contains(msgs[1].Content, "## REQUEST DATA\n") {
 		t.Errorf("format user message should still carry data: %q", msgs[1].Content)
 	}
 }

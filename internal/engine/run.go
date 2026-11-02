@@ -65,8 +65,8 @@ func Run(ctx context.Context, script string, opts RunOptions) error {
 		return fmt.Errorf("cannot run script: busybox not probed")
 	}
 
-	// The script travels on stdin (sh -s) — no temp files, no
-	// artifacts — wrapped in a group whose redirection attaches
+	// The script travels on stdin (sh -s) - no temp files, no
+	// artifacts - wrapped in a group whose redirection attaches
 	// fd 9, the user's stdin, as the script's fd 0. fd 9 is the
 	// highest single-digit descriptor, so the redirection works in
 	// any POSIX shell while leaving fds 3-8 free for the script's
@@ -164,7 +164,7 @@ func stdinFile(r io.Reader) (f *os.File, cleanup func(), err error) {
 
 // aliasPrelude returns shell lines aliasing every allowed command to its
 // absolute path. Shadowing ones must win over the busybox applets, and
-// inside the sandbox the others would not resolve through $PATH at all —
+// inside the sandbox the others would not resolve through $PATH at all -
 // so all commands are aliased uniformly, granting exactly what the user
 // resolved at parse time.
 func aliasPrelude(commands []prompt.Command) string {

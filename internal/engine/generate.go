@@ -30,6 +30,9 @@ type GenerateOptions struct {
 	Request  string
 	Args     []string
 	Commands []prompt.Command
+	// Inputs are reference files listed in the system message's
+	// REFERENCES section. See prompt.BuildOptions.
+	Inputs []prompt.Input
 	// Busybox is the resolved busybox that will run the script, used
 	// to tell the model which applets it has.
 	Busybox busybox.Options
@@ -54,6 +57,7 @@ func Generate(ctx context.Context, opts GenerateOptions) (string, error) {
 		Request:  opts.Request,
 		Args:     opts.Args,
 		Commands: opts.Commands,
+		Inputs:   opts.Inputs,
 		Applets:  opts.Busybox.Applets,
 		Format:   opts.Format,
 		Output:   opts.Output,

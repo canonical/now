@@ -38,6 +38,15 @@ type Command struct {
 	Help string
 }
 
+// Input is a reference file from -i: shown to the model in the
+// REFERENCES section, never passed to the script via "$@".
+type Input struct {
+	// Name is the file path as given to -i.
+	Name string
+	// Data is the file content, as read.
+	Data string
+}
+
 // BuildOptions carries everything the prompt needs.
 type BuildOptions struct {
 	// Request is the natural language request.
@@ -48,6 +57,10 @@ type BuildOptions struct {
 
 	// Commands are external commands allowed in the script.
 	Commands []Command
+
+	// Inputs are reference files listed in the user message's
+	// REFERENCES section. They are not passed in "$@".
+	Inputs []Input
 
 	// Applets are the busybox command names available to the script,
 	// from its --list output.
@@ -82,7 +95,6 @@ type BuildOptions struct {
 // - `format` is always "busybox ash -e"
 // - `style` is the content organization (indentation, etc)
 // - `structure` is the shape of the response
-//
 const busyboxPrompt = `
 You generate one-shot shell scripts for ` + "`busybox ash -e`" + `.
 
@@ -138,7 +150,6 @@ echo 'Hello world'
 // - `format` is always the -f value
 // - `style` is the content organization (indentation, etc)
 // - `structure` is the shape of the response
-//
 const formatPrompt = `
 You produce content in the %q format.
 
@@ -187,19 +198,9 @@ func buildScript(opts BuildOptions) []Message {
 	}
 	system.WriteString(strings.Join(names, " "))
 	system.WriteString("\n" + strings.Join(opts.Applets, " "))
-	references := false
-	for _, c := range opts.Commands {
-		if c.Help == "" {
-			continue // command has no --help to reference
-		}
-		if !references {
-			system.WriteString("\n\n## REFERENCES\n")
-			references = true
-		}
-		system.WriteString("\n### " + c.Name + " --help\n" + c.Help)
-	}
 
 	var user strings.Builder
+	writeReferences(&user, opts.Commands, opts.Inputs)
 	user.WriteString("## REQUEST\n")
 	user.WriteString(opts.Request)
 	user.WriteString("\n")
@@ -207,14 +208,14 @@ func buildScript(opts BuildOptions) []Message {
 		if opts.Output {
 			// The script is dumped, not executed, so "$@" is
 			// meaningless: present the args as plain data.
-			writeDataBlock(&user, opts.Args, "script")
+			writeData(&user, opts.Args, "script")
 		} else {
-			user.WriteString("\n## \"$@\"\n```\n")
+			user.WriteString("\n## REQUEST DATA IN \"$@\"\n")
 			sanitized := false
 			quoted := false
 			for i, arg := range opts.Args {
 				arg, replaced := sanitizeArg(arg)
-				user.WriteString(fmt.Sprintf("$%d | %s\n", i+1, arg))
+				user.WriteString(fmt.Sprintf("%d:%s\n", i+1, arg))
 				if replaced {
 					sanitized = true
 				}
@@ -222,9 +223,9 @@ func buildScript(opts BuildOptions) []Message {
 					quoted = true
 				}
 			}
-			user.WriteString("```\n" +
-				"EVERY LINE above the LITERAL string in the respective index in \"$@\". " +
-				"Your job is to INFER what the data means BASED ON THE REQUEST and generate the script to SOLVE THE REQUEST.\n" +
+			user.WriteString("---\n" +
+				"The REQUEST DATA is inline above with lines numbered as in `grep -n`: N:LITERAL where N the line number and index in \"$@\" (and $1, $2, etc). " +
+				"Your job is to INFER what the data means BASED ON THE REQUEST and ATTACHMENTS and generate the script to SOLVE THE REQUEST.\n" +
 				"You may use \"$@\", $1, $2, etc, or the literal strings. Prefer STRING LITERALS rather than variables for SIMPLE cases.\n")
 			if quoted {
 				user.WriteString("Some of these lines include quotes so either escape them properly or use variables for these.\n")
@@ -242,45 +243,42 @@ func buildScript(opts BuildOptions) []Message {
 }
 
 // buildFormat builds the output-mode prompt used when -f selects a
-// format other than "sh". There is no command surface (the model
-// produces content, not a runnable script), so no ALLOWED COMMANDS or
-// REFERENCES sections, and the user message drops the script-only
-// \"$@\" note while keeping the data and the sanitization note.
+// format other than "sh". There is no command surface, so no ALLOWED
+// COMMANDS section, and the args are plain data since nothing runs.
 func buildFormat(opts BuildOptions) []Message {
-	system := fmt.Sprintf(formatPrompt, opts.Format, opts.Format)
+	var system strings.Builder
+	fmt.Fprintf(&system, formatPrompt, opts.Format, opts.Format)
 
 	var user strings.Builder
+	writeReferences(&user, opts.Commands, opts.Inputs)
 	user.WriteString("## REQUEST\n")
 	user.WriteString(opts.Request)
 	user.WriteString("\n")
 	if len(opts.Args) > 0 {
-		writeDataBlock(&user, opts.Args, "output")
+		writeData(&user, opts.Args, "output")
 	}
 
 	return []Message{
-		{Role: "system", Content: system},
+		{Role: "system", Content: system.String()},
 		{Role: "user", Content: user.String()},
 	}
 }
 
-// writeDataBlock writes the args as a plain ## DATA section to b,
-// one sanitized arg per line, followed by the inference note using
-// the given verb ("script" or "output"). It is shared by the
-// dumped-script and format prompts, where "$@" is meaningless and
-// the args are plain data.
-func writeDataBlock(b *strings.Builder, args []string, verb string) {
-	b.WriteString("\n## DATA\n```\n")
+// writeData writes the args as a plain ## DATA section for the
+// dumped-script and format prompts, where nothing runs and "$@" is
+// meaningless. The verb is "script" or "output".
+func writeData(b *strings.Builder, args []string, verb string) {
+	b.WriteString("\n## REQUEST DATA\n")
 	sanitized := false
-	for _, arg := range args {
+	for i, arg := range args {
 		arg, replaced := sanitizeArg(arg)
-		b.WriteString(arg)
-		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("%d:%s\n", i+1, arg))
 		if replaced {
 			sanitized = true
 		}
 	}
-	b.WriteString("```\n" +
-		"EVERY LINE above is the LITERAL string in the data. " +
+	b.WriteString("---\n" +
+		"The REQUEST DATA is inline above with lines numbered as in `grep -n`: N:LITERAL where N the line number. " +
 		"Your job is to INFER what the data means BASED ON THE REQUEST and generate the " + verb + " to SOLVE THE REQUEST.\n" +
 		"If you need any of this data in the " + verb + " you must put it there yourself.\n")
 	if sanitized {
@@ -288,11 +286,51 @@ func writeDataBlock(b *strings.Builder, args []string, verb string) {
 	}
 }
 
-// sanitizeArg renders one argument as a REQUEST DATA line, prefixed with `=`
-// when the text is precise, or `!` when unprintable characters had to be
-// replaced by `�`.
+// writeReferences writes the REFERENCES section: the -c --help
+// subsections, then one "### grep -n ” <path>" per -i file, its
+// lines in the REQUEST DATA N:LITERAL form, empty lines skipped.
+// The header is written only when a reference follows it.
+func writeReferences(b *strings.Builder, commands []Command, inputs []Input) {
+	references := false
+	writeHeader := func() {
+		if !references {
+			b.WriteString("## ATTACHMENTS\n")
+			b.WriteString("Any � replaces non-printable characters in the references below.\n")
+			references = true
+		}
+	}
+	for _, c := range commands {
+		if c.Help == "" {
+			continue // command has no --help to reference
+		}
+		writeHeader()
+		b.WriteString("\n### OUTPUT: " + c.Name + " --help\n")
+		for _, line := range strings.Split(c.Help, "\n") {
+			line, _ = sanitizeArg(line)
+			b.WriteString(line + "\n")
+		}
+	}
+	for _, in := range inputs {
+		writeHeader()
+		name, _ := sanitizeArg(in.Name)
+		b.WriteString("\n### FILE: " + name + "\n")
+		data := strings.TrimSuffix(in.Data, "\n") // terminator, not a line
+		for i, line := range strings.Split(data, "\n") {
+			line, _ = sanitizeArg(line)
+			fmt.Fprintf(b, "%d:%s\n", i+1, line)
+		}
+		b.WriteString("---\n")
+		b.WriteString("The up-to-date file body is inlined above with lines numbered as in `grep -n`: N:LITERAL where N is the line number.\n")
+	}
+	if references {
+		b.WriteString("\n") // blank line before whatever follows
+	}
+}
+
+// sanitizeArg replaces newlines and unprintable runes with the
+// replacement char, so the result fits on one line.
 func sanitizeArg(arg string) (newarg string, sanitized bool) {
-	if isPrintable(arg) {
+	if isPrintableLine(arg) {
 		return arg, false
 	}
 	var b strings.Builder
@@ -306,7 +344,7 @@ func sanitizeArg(arg string) (newarg string, sanitized bool) {
 	return b.String(), true
 }
 
-func isPrintable(arg string) bool {
+func isPrintableLine(arg string) bool {
 	for _, r := range arg {
 		if r == '\n' || !unicode.IsPrint(r) {
 			return false

@@ -106,7 +106,7 @@ func TestRunLowFdsFreeForScript(t *testing.T) {
 	// The user's stdin rides on fd 9, leaving fds 3-8 free for the
 	// script's own redirections. The group rewires fd 9 onto fd 0
 	// and closes fd 9 (9<&-), so the script reads user data from
-	// fd 0 — and may open fd 3 on its own file without collision.
+	// fd 0 - and may open fd 3 on its own file without collision.
 	var out, errOut bytes.Buffer
 	script := "exec 3</dev/null\nread line <&3 || true\nexec 3<&-\nread rest\necho \"first:[$line] rest:[$rest]\""
 	err := engine.Run(context.Background(), script, engine.RunOptions{
@@ -124,8 +124,8 @@ func TestRunLowFdsFreeForScript(t *testing.T) {
 func TestRunLongScriptDoesNotExecuteStdin(t *testing.T) {
 	// The wrapping group forces ash to parse the whole script before
 	// executing any of it, so the fd 0 swap (fd 9 → fd 0) takes effect
-	// only after parsing completes. Without the group — a bare
-	// "exec 0<&9" prelude — ash reads the script from fd 0 in buffered
+	// only after parsing completes. Without the group - a bare
+	// "exec 0<&9" prelude - ash reads the script from fd 0 in buffered
 	// chunks, and once its buffer drains past the swap it would parse
 	// the user's data as commands. This test pins the safety property:
 	// a script long enough to exceed ash's read buffer, with user data
@@ -281,8 +281,8 @@ func TestRunAppletWinsWithoutAlias(t *testing.T) {
 }
 
 func TestRunAliasesAllCommands(t *testing.T) {
-	// Every -c command is aliased to its absolute path — not just the
-	// applet-shadowing ones — so the script runs exactly the binary
+	// Every -c command is aliased to its absolute path - not just the
+	// applet-shadowing ones - so the script runs exactly the binary
 	// resolved at parse time, and works inside the sandbox where $PATH
 	// directories are not bound.
 	dir := t.TempDir()

@@ -27,6 +27,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/canonical/now/internal/prompt"
 )
@@ -48,6 +49,11 @@ type Options struct {
 	// Commands are external commands from $PATH allowed in the
 	// script, with their --help output.
 	Commands []prompt.Command
+
+	// Inputs are reference files read with -i, in the order given,
+	// with their full content. They are made available to the model
+	// under their name, but not to the script via "$@".
+	Inputs []prompt.Input
 
 	// Yes auto-approves the generated script.
 	Yes bool
@@ -131,8 +137,9 @@ often the model can tell what is meant with no further help.
 Options:
   <request>         Natural language request.
   <arg>             Data made available to the model and script, ordered.
-  -                 Read either the request or the arguments from stdin.
+  -                 Read request or args (position defines) from stdin.
   -p <path>         Read the request from the prompt text file.
+  -i <path> -i ...  Read the text file as reference data.
 
 Running control:
   -y                Auto-approve the generated script without asking.
@@ -263,9 +270,21 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 			// text above. They are kept as quiet conveniences; do not
 			// add them to the documented options.
 			return nil, &HelpRequested{}
-		// -r, -w, and -c stay plain and separate: -w implies read too,
+		// -r, -w, -c, and -i stay plain and separate: -w implies read too,
 		// and we do not want to take over -x, as it may come some day
 		// with an execution semantics that bwrap alone cannot express.
+		case arg == "-i":
+			if i+1 >= len(argv) {
+				return nil, parseErrf("-i requires a file path")
+			}
+			i++
+			if err := addInput(opts, argv[i]); err != nil {
+				return nil, err
+			}
+		case strings.HasPrefix(arg, "-i="):
+			if err := addInput(opts, strings.TrimPrefix(arg, "-i=")); err != nil {
+				return nil, err
+			}
 		case arg == "-r":
 			if i+1 >= len(argv) {
 				return nil, parseErrf("-r requires a path")
@@ -357,6 +376,41 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 		i++
 	}
 	return nil, nil
+}
+
+// maxInputSize bounds the content of one -i reference file. A
+// larger file would dominate the prompt.
+const maxInputSize = 16 << 10
+
+// addInput reads the reference file and records it under the path as
+// given, so the model refers to the file by that name. The content
+// must be valid UTF-8 within 16k.
+func addInput(opts *Options, path string) error {
+	info, err := os.Stat(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return parseErrf("cannot read %q: file not found", path)
+		}
+		return parseErrf("cannot read %q: %v", path, err)
+	}
+	if info.IsDir() {
+		return parseErrf("cannot read %q: it is a directory", path)
+	}
+	if info.Size() > maxInputSize {
+		return parseErrf("cannot read %q: file is larger than 16k", path)
+	}
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if errors.Is(err, fs.ErrNotExist) {
+			return parseErrf("cannot read %q: file not found", path)
+		}
+		return parseErrf("cannot read %q: %v", path, err)
+	}
+	if !utf8.Valid(data) {
+		return parseErrf("cannot read %q: file is not valid UTF-8", path)
+	}
+	opts.Inputs = append(opts.Inputs, prompt.Input{Name: path, Data: string(data)})
+	return nil
 }
 
 // addReadable records path as readable, verifying it exists so a typo
