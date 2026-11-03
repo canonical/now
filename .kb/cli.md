@@ -5,11 +5,6 @@ flag grammar, the approval flow, the stream discipline, and the full
 cycle that threads every subsystem together. The emphasis is on
 decisions and discussions that the code cannot show.
 
-Read the top-level `.kb/agents.md` file before continuing below.
-
-
-# Overview
-
 The CLI is the orchestrator and the only policy-maker in the project:
 it parses the command line, loads configuration, resolves busybox,
 probes confinement, generates the script, **owns the approval step**,
@@ -18,43 +13,57 @@ is deliberate (see `.kb/engine.md` for the engine side of that split).
 `cli.Run(RunOptions)` performs the full cycle; `cmd/now/main.go` is a
 four-line dispatcher that hands it the real streams.
 
-
-# Important
-
-- **stdout belongs to the script; stderr belongs to now.** The
-  generated script's output goes to stdout so it can be piped; the
-  script-for-review, approval prompts, and all errors go to stderr.
-  This was decided after an earlier design printed the script to
-  stdout and switched behavior on whether stdout was a terminal -
-  rejected as embedding CLI policy in the wrong place and for
-  breaking the pipe use case (script output had to be separated from
-  the review text).
-- **Approval reads /dev/tty, never stdin.** stdin is data (the `-`
-  placeholder consumes it); the approval question goes to the
-  controlling terminal so both can coexist. This fixed a real bug:
-  `cat file | now "explain this" -` drained stdin during parsing and
-  the approval read then saw EOF - which, worse, silently read as an
-  empty line and auto-approved.
-- **No terminal and no `-y`/`-q` is an error, not a skip.** "We had to
-  approve but cannot" - exit 1 with `cannot ask for approval without
-  a terminal`, rather than guessing the user's intent.
-- **CTRL-C cancels cleanly in any phase**: `signal.NotifyContext` at
-  `cli.Run` entry; the context threads through the API call
-  (`http.NewRequestWithContext`), the approval wait (`select` on
-  `ctx.Done()`), and execution (`exec.CommandContext`). Before this,
-  only the approval phase handled the signal, and the semantics
-  changed per phase - documented as the "Signal handling" TODO item
-  and resolved by threading context everywhere.
-- **Fail-fast ordering, all before the model call**: parse errors,
-  missing commands (`-c`), missing grant paths (`-r`/`-w`), config
-  load, busybox resolution, sandbox probe. `TestRunSandboxFailsBefore-
-  APICall` pins the strongest form: broken confinement → zero API
-  requests. The rationale is constant: the model call costs money and
-  the human review costs attention; neither is spent on an invocation
-  that cannot run.
+IMPORTANT: Read the .kb/agents.md file.
 
 
-# Architecture
+# Laws
+
+## §1 - stdout belongs to the script; stderr belongs to now
+
+The generated script's output goes to stdout so it can be piped; the
+script-for-review, approval prompts, and all errors go to stderr.
+This was decided after an earlier design printed the script to
+stdout and switched behavior on whether stdout was a terminal -
+rejected as embedding CLI policy in the wrong place and for
+breaking the pipe use case (script output had to be separated from
+the review text).
+
+## §2 - Approval reads /dev/tty, never stdin
+
+stdin is data (the `-`
+placeholder consumes it); the approval question goes to the
+controlling terminal so both can coexist. This fixed a real bug:
+`cat file | now "explain this" -` drained stdin during parsing and
+the approval read then saw EOF - which, worse, silently read as an
+empty line and auto-approved.
+
+## §3 - No terminal and no `-y`/`-q` is an error, not a skip
+
+"We had to approve but cannot" - exit 1 with `cannot ask for approval
+without a terminal`, rather than guessing the user's intent.
+
+## §4 - CTRL-C cancels cleanly in any phase
+
+`signal.NotifyContext` at
+`cli.Run` entry; the context threads through the API call
+(`http.NewRequestWithContext`), the approval wait (`select` on
+`ctx.Done()`), and execution (`exec.CommandContext`). Before this,
+only the approval phase handled the signal, and the semantics
+changed per phase - documented as the "Signal handling" TODO item
+and resolved by threading context everywhere.
+
+## §5 - Fail-fast ordering, all before the model call
+
+Parse errors,
+missing commands (`-c`), missing grant paths (`-r`/`-w`), config
+load, busybox resolution, sandbox probe. `TestRunSandboxFailsBefore-
+APICall` pins the strongest form: broken confinement → zero API
+requests. The rationale is constant: the model call costs money and
+the human review costs attention; neither is spent on an invocation
+that cannot run.
+
+
+# Concepts
 
 ## The full cycle (cli.Run)
 
@@ -134,21 +143,21 @@ never runs, so `"$@"` is meaningless. `BuildOptions.Output` (threaded
 distinction:
 
 - **Run mode** (`Output == false`): the user message frames args as
-  `## "$@"` with `$1 | <arg>` / `$2 | <arg>` indexing and the run-time
-  notes (use `"$@"`/`$1`/`$2` or literals; quote-escape warnings;
-  sanitization warnings).
+  `## REQUEST DATA IN "$@"` with `N:<arg>` lines (N the index in
+  `"$@"`), plus the run-time notes (use `"$@"`/`$1`/`$2` or
+  literals; quote-escape warnings; sanitization warnings).
 - **Write-script mode** (`Output == true`): the user message frames
-  args as a plain `## DATA` block (one arg per line, no `$N |`), with
-  the inference note using "script". `"$@"` is never mentioned.
-- **Format mode**: `Output` is ignored; the user message uses the same
-  `## DATA` block (the shared `writeDataBlock` helper), with the
-  inference note using "output".
+  args as a `## REQUEST DATA` block with `N:<arg>` lines, with the
+  inference note using "script". `"$@"` is never mentioned.
+- **Format mode**: `Output` is ignored; the user message uses the
+  same `## REQUEST DATA` block (the shared `writeData` helper),
+  with the inference note using "output".
 
 `cli.Run` sets `Output: true` only in `writeOutput` (the write-mode
 branch); the run-mode `engine.Generate` call leaves it at its zero
 value (`false`). The system message is unaffected by `Output` - a
-dumped script still uses `busyboxPrompt` + `## ALLOWED COMMANDS` +
-`## REFERENCES` and the SCRIPT reply protocol, since the model still
+dumped script still uses `busyboxPrompt` + `## ALLOWED COMMANDS`
+and the SCRIPT reply protocol, since the model still
 produces a script; only the user-message arg framing changes.
 
 Output writing appends a trailing newline always: formatted content
@@ -163,9 +172,21 @@ does not pre-`Stat` the file (it is being created). Success is silent.
   plain argument).
 - `-y` approve, `-q` approve-and-hide, `-t` trace, `-c cmd,...`,
   `-r path`, `-w path`, `-n` network, `-s` sandbox, `-f fmt`,
-  `-o file`, `-p file` read request from a prompt text file.
+  `-o file`, `-p file` read request from a prompt text file,
+  `-i file` read a reference file for the prompt.
   `=`-forms work for value-taking flags. Grants repeat and
   accumulate.
+- `-i <path>` reads a reference file into the prompt (see
+  `.kb/prompt.md`): the content is listed under the path as given,
+  and the model may refer to the file by that path in the script.
+  The files are not arguments - they never reach `"$@"`. The file
+  is probed with Stat before being read: missing, a directory, or
+  larger than 16k is an error without reading a byte, and the
+  content must be valid UTF-8. In sandbox mode the paths are
+  granted readable (like `-c` command paths), since the prompt
+  names them as readable paths. `-i` alone does not turn
+  confinement on. Valid in write mode too, and in every format, as
+  data for the request.
 - Exactly one `-` placeholder in the whole invocation, either as the
   request (stdin lines joined with newlines; multi-line requests are a
   feature - organizing a request with space is a primary use case,
