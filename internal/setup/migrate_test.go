@@ -47,7 +47,7 @@ func TestMigrate(t *testing.T) {
 		"api-key=abc...\n"+
 		"api-model=foobar\n")
 
-	cfg, err := setup.Load()
+	cfg, err := setup.Load("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -70,8 +70,8 @@ func TestMigrate(t *testing.T) {
 		"    api-key: \"abc...\"\n" +
 		"\n" +
 		"models.default:\n" +
-		"    name: \"foobar\"\n" +
-		"    provider: \"local\"\n"
+		"    provider: \"local\"\n" +
+		"    provider-model: \"foobar\"\n"
 	assertEqual(t, "migrated content", string(data), want)
 
 	if _, err := os.Stat(filepath.Join(dir, ".now")); !os.IsNotExist(err) {
@@ -94,7 +94,7 @@ func TestMigrateNewFileWins(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, ".now.cnf"), []byte(newContent), 0o600); err != nil {
 		t.Fatalf("writing config: %v", err)
 	}
-	cfg, err := setup.Load()
+	cfg, err := setup.Load("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -106,7 +106,7 @@ func TestMigrateNewFileWins(t *testing.T) {
 
 func TestMigrateBadLegacy(t *testing.T) {
 	dir := withLegacy(t, "api-url\n")
-	_, err := setup.Load()
+	_, err := setup.Load("")
 	if err == nil || !strings.Contains(err.Error(), "expected key=value") {
 		t.Fatalf("expected legacy parse error, got %v", err)
 	}
@@ -120,7 +120,7 @@ func TestMigrateBadLegacy(t *testing.T) {
 
 func TestMigrateUnknownKey(t *testing.T) {
 	dir := withLegacy(t, "api-url=http://x\napi-toke=y\n")
-	_, err := setup.Load()
+	_, err := setup.Load("")
 	if err == nil || !strings.Contains(err.Error(), "unknown key") {
 		t.Fatalf("expected unknown key error, got %v", err)
 	}
@@ -131,7 +131,7 @@ func TestMigrateUnknownKey(t *testing.T) {
 
 func TestMigrateMissingAPIURL(t *testing.T) {
 	dir := withLegacy(t, "api-key=abc...\n")
-	_, err := setup.Load()
+	_, err := setup.Load("")
 	if err == nil || !strings.Contains(err.Error(), "has no api-url") {
 		t.Fatalf("expected api-url error, got %v", err)
 	}

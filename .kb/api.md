@@ -46,18 +46,22 @@ and the engine never changes. See `.kb/engine.md`.
 
 ## §4 - Config keys and defaults
 
-Validated at load:
+Validated at load (see `.kb/setup.md` for the full layout and
+resolution):
 
-- `api-url` - required, no default; missing is a load error.
-- `api-key` - optional; sent as `Authorization: Bearer <key>` only
-  when non-empty (local servers often need none).
-- `api-model` - defaults to `default`, chosen to work with servers
-  that ignore or resolve the model name themselves (llama.cpp ignores
-  it; Ollama requires a real tag like `llama3.1:8b`).
-- `api-type` - defaults to `completions-v1`; any other value is a
-  load error (`unsupported api-type`). Only this backend exists; the
-  key exists to make the extension seam real rather than hypothetical,
-  and its validation is where backend selection will dispatch.
+- `providers.<name>.api-url` - required, no default; missing is a
+  load error.
+- `providers.<name>.api-key` - optional; sent as `Authorization:
+  Bearer <key>` only when non-empty (local servers often need none).
+- `models.<name>.provider-model` - defaults to the model name
+  itself, chosen to work with servers that ignore or resolve the
+  model name themselves (llama.cpp ignores it; Ollama requires a
+  real tag like `llama3.1:8b`).
+- `providers.<name>.api-type` - defaults to `completions-v1`; any
+  other value is a load error (`unsupported api-type`). Only this
+  backend exists; the key exists to make the extension seam real
+  rather than hypothetical, and its validation is where backend
+  selection will dispatch.
 
 ## §5 - Error surface
 

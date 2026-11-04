@@ -97,9 +97,9 @@ func Run(ctx context.Context, opts RunOptions) error {
 
 	var setupOpts *setup.Options
 	if opts.SetupPath == "" {
-		setupOpts, err = setup.Load()
+		setupOpts, err = setup.Load(parsed.Model)
 	} else {
-		setupOpts, err = setup.LoadFrom(opts.SetupPath)
+		setupOpts, err = setup.LoadFrom(opts.SetupPath, parsed.Model)
 	}
 
 	// Write mode (-f or -o): generate a script or formatted content and

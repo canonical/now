@@ -514,6 +514,44 @@ func TestParseYesFlag(t *testing.T) {
 	assertEqual(t, "Args", opts.Args, []string{"-y"})
 }
 
+func TestParseModelFlag(t *testing.T) {
+	opts := mustParse(t, []string{"-m", "other", "q"})
+	assertEqual(t, "Model", opts.Model, "other")
+
+	opts = mustParse(t, []string{"-m=other", "q"})
+	assertEqual(t, "Model", opts.Model, "other")
+
+	// No -m selects models.default at load time.
+	opts = mustParse(t, []string{"q"})
+	assertEqual(t, "Model", opts.Model, "")
+
+	// -m after the request is a path, not a flag.
+	opts = mustParse(t, []string{"q", "-m"})
+	assertEqual(t, "Model", opts.Model, "")
+	assertEqual(t, "Args", opts.Args, []string{"-m"})
+}
+
+func TestParseModelFlagErrors(t *testing.T) {
+	tests := []struct {
+		name string
+		argv []string
+		want string
+	}{
+		{"missing value", []string{"-m"}, "-m requires a model name"},
+		{"empty value", []string{"-m=", "q"}, "-m requires a model name"},
+		{"twice", []string{"-m", "a", "-m", "b", "q"}, "cannot use -m more than once"},
+		{"twice via =", []string{"-m=a", "-m=b", "q"}, "cannot use -m more than once"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := cli.Parse(tt.argv, strings.NewReader(""))
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("expected error containing %q, got %v", tt.want, err)
+			}
+		})
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	tests := []struct {
 		name string

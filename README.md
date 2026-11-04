@@ -75,6 +75,7 @@ Options:
   -                 Read request or args (position defines) from stdin.
   -p <path>         Read the request from the prompt text file.
   -i <path> -i ...  Read the text file as reference data.
+  -m <model>        Use named model from configuration instead of default.
 
 Running control:
   -y                Auto-approve the generated script without asking.
@@ -107,10 +108,11 @@ providers.local:
     api-key: "abc..."
 
 models.default:
-    name: "my-model"
     provider: "local"
+    provider-model: "the-model"
 ```
-The model `name` is optional and defaults to the model key itself if unset.
+The `-m` option allows selecting a model other than `default` at runtime.
+The `provider-model` field is optional and defaults to the model name itself if unset.
 
 If you run _now_ without a valid configuration, it will propose a script for creating it.
 

@@ -72,8 +72,10 @@ Order matters and each step's position is a decision:
 1. `signal.NotifyContext` - the root context, from the entry point.
 2. `Parse(argv, stdin)` - flags and the request; `-h`/`--help` prints
    usage and exits zero *here*, not in main.
-3. Setup load - `$HOME/.now` or the injected `SetupPath` (exists for
-   tests, which point it at a temp file with a fake API URL).
+3. Setup load - `$HOME/.now.cnf` (or the injected `SetupPath`,
+   exists for tests, which point it at a temp file with a fake API
+   URL), resolving the `-m` model name through its provider. A missing
+   file plus no `-y`/`-q` offers the sample-script bootstrap below.
 4. **Write-mode branch** - when `-f`/`-o` selected a format, the cycle
    diverges here and never reaches the run-mode steps below. See
    "Write mode" below.

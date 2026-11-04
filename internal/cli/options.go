@@ -55,6 +55,10 @@ type Options struct {
 	// under their name, but not to the script via "$@".
 	Inputs []prompt.Input
 
+	// Model is the name of the configuration's models entry the run
+	// resolves through its provider. Set by -m, empty means "default".
+	Model string
+
 	// Yes auto-approves the generated script.
 	Yes bool
 
@@ -145,6 +149,7 @@ Options:
   -                 Read request or args (position defines) from stdin.
   -p <path>         Read the request from the prompt text file.
   -i <path> -i ...  Read the text file as reference data.
+  -m <model>        Use named model from configuration instead of default.
 
 Running control:
   -y                Auto-approve the generated script without asking.
@@ -353,6 +358,18 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 			opts.PromptFile = argv[i]
 		case strings.HasPrefix(arg, "-p="):
 			opts.PromptFile = strings.TrimPrefix(arg, "-p=")
+		case arg == "-m":
+			if i+1 >= len(argv) {
+				return nil, parseErrf("-m requires a model name")
+			}
+			i++
+			if err := setModel(opts, argv[i]); err != nil {
+				return nil, err
+			}
+		case strings.HasPrefix(arg, "-m="):
+			if err := setModel(opts, strings.TrimPrefix(arg, "-m=")); err != nil {
+				return nil, err
+			}
 		case len(arg) > 1 && arg[0] == '-' && strings.TrimRight(arg, "abcdefghijklmnopqrstuvwxyz") == "-":
 			for _, flag := range arg[1:] {
 				switch flag {
@@ -465,6 +482,21 @@ func addCommands(opts *Options, list string) error {
 		}
 		opts.Commands = append(opts.Commands, cmd)
 	}
+	return nil
+}
+
+// setModel records the model name selected by -m. The value must
+// be a non-empty bare word; whether it exists is checked when the
+// configuration loads, since only it knows the models map. Using -m
+// more than once is ambiguous and an error.
+func setModel(opts *Options, val string) error {
+	if val == "" {
+		return parseErrf("-m requires a model name")
+	}
+	if opts.Model != "" {
+		return parseErrf("cannot use -m more than once")
+	}
+	opts.Model = val
 	return nil
 }
 

@@ -52,8 +52,8 @@ terminology, update docs, messages, and identifiers together.
 
 Start with "cannot" - not "unable to", "can't", "can not", "failed
 to", or "<verb>ing" prefixes ("opening file", "reading config").
-E.g. `cannot open ~/.now: ...`, not `opening ~/.now: ...` or `failed
-to open ~/.now: ...`.
+E.g. `cannot open ~/.now.cnf: ...`, not `opening ~/.now.cnf: ...` or
+`failed to open ~/.now.cnf: ...`.
 
 ## §7 - Keep comments short
 

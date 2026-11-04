@@ -36,7 +36,7 @@ func setupContent(url, model string) string {
 		"\nmodels.default:\n" +
 		"    provider: \"local\"\n"
 	if model != "" {
-		content += "    name: \"" + model + "\"\n"
+		content += "    provider-model: \"" + model + "\"\n"
 	}
 	return content
 }
@@ -761,6 +761,44 @@ func TestRunNetworkEnforcesSandbox(t *testing.T) {
 	if got := len(f.Requests()); got != 0 {
 		t.Fatalf("model was called %d times, want 0", got)
 	}
+}
+
+func TestRunModelSelection(t *testing.T) {
+	// -m resolves the models.other entry; the request body carries
+	// its name, not the flag value.
+	f := completions.NewFakeLLM("---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
+	url, err := f.Start()
+	if err != nil {
+		t.Fatalf("cannot start fake: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Stop() })
+
+	setupPath := filepath.Join(t.TempDir(), ".now.cnf")
+	content := setupContent(url, "test") +
+		"models.other:\n" +
+		"    provider: \"local\"\n" +
+		"    provider-model: \"big-model\"\n"
+	if err := os.WriteFile(setupPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("cannot write setup: %v", err)
+	}
+
+	var stdout, stderr strings.Builder
+	err = cli.Run(context.Background(), cli.RunOptions{
+		Argv:      []string{"-y", "-m", "other", "do something"},
+		Stdin:     strings.NewReader(""),
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		SetupPath: setupPath,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", stdout.String(), "hello\n")
+	req := f.LastRequest()
+	if req == nil {
+		t.Fatalf("no request recorded")
+	}
+	assertEqual(t, "model", req["model"], "big-model")
 }
 
 func TestRunErrorReply(t *testing.T) {

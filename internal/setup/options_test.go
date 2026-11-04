@@ -58,7 +58,7 @@ func localConfig(extra string) string {
 
 func TestLoadMissingFile(t *testing.T) {
 	withHome(t, "")
-	_, err := setup.Load()
+	_, err := setup.Load("")
 	if err == nil || !strings.Contains(err.Error(), "cannot open") {
 		t.Fatalf("expected open error, got %v", err)
 	}
@@ -66,15 +66,15 @@ func TestLoadMissingFile(t *testing.T) {
 
 func TestLoadMissingModelDefault(t *testing.T) {
 	withHome(t, "providers.local:\n    api-url: \"http://x\"\n")
-	_, err := setup.Load()
-	if err == nil || !strings.Contains(err.Error(), "models.default is not set") {
+	_, err := setup.Load("")
+	if err == nil || !strings.Contains(err.Error(), "models.default not found") {
 		t.Fatalf("expected models.default error, got %v", err)
 	}
 }
 
 func TestLoadModelWithoutProvider(t *testing.T) {
 	withHome(t, "providers.local:\n    api-url: \"http://x\"\n\nmodels.default: {}\n")
-	_, err := setup.Load()
+	_, err := setup.Load("")
 	if err == nil || !strings.Contains(err.Error(), "models.default has no provider") {
 		t.Fatalf("expected provider error, got %v", err)
 	}
@@ -82,7 +82,7 @@ func TestLoadModelWithoutProvider(t *testing.T) {
 
 func TestLoadUnknownProvider(t *testing.T) {
 	withHome(t, "providers.local:\n    api-url: \"http://x\"\n\nmodels.default:\n    provider: \"remote\"\n")
-	_, err := setup.Load()
+	_, err := setup.Load("")
 	if err == nil || !strings.Contains(err.Error(), "unknown provider") {
 		t.Fatalf("expected unknown provider error, got %v", err)
 	}
@@ -90,7 +90,7 @@ func TestLoadUnknownProvider(t *testing.T) {
 
 func TestLoadMissingAPIURL(t *testing.T) {
 	withHome(t, "providers.local:\n    api-key: \"abc...\"\n\nmodels.default:\n    provider: \"local\"\n")
-	_, err := setup.Load()
+	_, err := setup.Load("")
 	want := `providers."local" has no api-url`
 	if err == nil || !strings.Contains(err.Error(), want) {
 		t.Fatalf("expected error containing %q, got %v", want, err)
@@ -104,8 +104,8 @@ func TestLoadFullConfig(t *testing.T) {
 		"    api-type: \"completions-v1\"\n"+
 		"\nmodels.default:\n"+
 		"    provider: \"local\"\n"+
-		"    name: \"foobar\"\n")
-	cfg, err := setup.Load()
+		"    provider-model: \"foobar\"\n")
+	cfg, err := setup.Load("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -119,7 +119,7 @@ func TestLoadFullConfig(t *testing.T) {
 
 func TestLoadDefaults(t *testing.T) {
 	withHome(t, localConfig(""))
-	cfg, err := setup.Load()
+	cfg, err := setup.Load("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -130,7 +130,7 @@ func TestLoadDefaults(t *testing.T) {
 
 func TestLoadUnsupportedAPIType(t *testing.T) {
 	withHome(t, localConfig("    api-type: \"other\"\n"))
-	_, err := setup.Load()
+	_, err := setup.Load("")
 	if err == nil || !strings.Contains(err.Error(), "unsupported api-type") {
 		t.Fatalf("expected api-type error, got %v", err)
 	}
@@ -138,7 +138,7 @@ func TestLoadUnsupportedAPIType(t *testing.T) {
 
 func TestLoadComments(t *testing.T) {
 	withHome(t, "# comment\n\nproviders.local:\n    api-url: \"http://x\"\n\nmodels.default:\n    provider: \"local\"\n")
-	cfg, err := setup.Load()
+	cfg, err := setup.Load("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -152,8 +152,8 @@ func TestLoadExtraBlocks(t *testing.T) {
 		"    api-url: \"http://remote\"\n"+
 		"\nmodels.other:\n"+
 		"    provider: \"remote\"\n"+
-		"    name: \"extra-model\"\n")
-	cfg, err := setup.Load()
+		"    provider-model: \"extra-model\"\n")
+	cfg, err := setup.Load("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -170,13 +170,13 @@ func TestLoadErrors(t *testing.T) {
 		{"bare word value", "api-url\n", "unquoted value"},
 		{"unknown top-level key", "api-toke: \"x\"\n", "unknown field"},
 		{"unknown provider key", "providers.local:\n    api-toke: \"x\"\n", "unknown field"},
-		{"unknown model key", "models.default:\n    provider: \"x\"\n    toke: \"y\"\n", "unknown field"},
+		{"unknown model name", "models.default:\n    provider: \"x\"\n    toke: \"y\"\n", "unknown field"},
 		{"cnf syntax error", "\t\tapi-url: \"x\"\n", "indentation prefixes"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			withHome(t, tt.content)
-			_, err := setup.Load()
+			_, err := setup.Load("")
 			if err == nil || !strings.Contains(err.Error(), tt.want) {
 				t.Fatalf("expected error containing %q, got %v", tt.want, err)
 			}
@@ -191,12 +191,12 @@ func TestLoadFrom(t *testing.T) {
 		"    api-url: \"http://127.0.0.1:1234\"\n" +
 		"\nmodels.default:\n" +
 		"    provider: \"local\"\n" +
-		"    name: \"mymodel\"\n"
+		"    provider-model: \"mymodel\"\n"
 	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
 		t.Fatalf("writing config: %v", err)
 	}
 
-	cfg, err := setup.LoadFrom(path)
+	cfg, err := setup.LoadFrom(path, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -209,8 +209,51 @@ func TestLoadFrom(t *testing.T) {
 
 func TestLoadFromMissingFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "missing")
-	_, err := setup.LoadFrom(path)
+	_, err := setup.LoadFrom(path, "")
 	if err == nil || !strings.Contains(err.Error(), "cannot open "+path) {
 		t.Fatalf("expected open error for %s, got %v", path, err)
+	}
+}
+
+func TestLoadModelByKey(t *testing.T) {
+	content := "providers.local:\n" +
+		"    api-url: \"http://local\"\n" +
+		"\nproviders.remote:\n" +
+		"    api-url: \"http://remote\"\n" +
+		"    api-key: \"rk\"\n" +
+		"\nmodels.default:\n" +
+		"    provider: \"local\"\n" +
+		"\nmodels.other:\n" +
+		"    provider: \"remote\"\n" +
+		"    provider-model: \"big-model\"\n"
+	withHome(t, content)
+	tests := []struct {
+		model string
+		url   string
+		key   string
+		name  string
+	}{
+		{"", "http://local", "", "default"},
+		{"other", "http://remote", "rk", "big-model"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			cfg, err := setup.Load(tt.model)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			assertEqual(t, "APIURL", cfg.APIURL, tt.url)
+			assertEqual(t, "APIKey", cfg.APIKey, tt.key)
+			assertEqual(t, "APIModel", cfg.APIModel, tt.name)
+		})
+	}
+}
+
+func TestLoadUnknownModelKey(t *testing.T) {
+	withHome(t, localConfig(""))
+	_, err := setup.Load("nope")
+	want := "models.nope not found"
+	if err == nil || !strings.Contains(err.Error(), want) {
+		t.Fatalf("expected error containing %q, got %v", want, err)
 	}
 }

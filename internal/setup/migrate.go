@@ -65,8 +65,8 @@ func parseLegacy(path string, data []byte) ([]legacyLine, error) {
 
 // renderLegacy spells the parsed old file as cnf: the endpoint
 // pairs and the comments land inside a providers.local block, and
-// the old api-model value becomes the models.default name. One
-// blank line separates the two blocks.
+// the old api-model value becomes the models.default
+// provider-model. One blank line separates the two blocks.
 func renderLegacy(lines []legacyLine) []byte {
 	var b strings.Builder
 	b.WriteString("providers.local:\n")
@@ -81,20 +81,21 @@ func renderLegacy(lines []legacyLine) []byte {
 		}
 	}
 	b.WriteString("\nmodels.default:\n")
+	b.WriteString("    provider: \"local\"\n")
 	for _, ln := range lines {
 		if ln.key == "api-model" && ln.value != "" {
-			fmt.Fprintf(&b, "    name: \"%s\"\n", cnfembed.Escape(ln.value))
+			fmt.Fprintf(&b, "    provider-model: \"%s\"\n", cnfembed.Escape(ln.value))
 		}
 	}
-	b.WriteString("    provider: \"local\"\n")
 	return []byte(b.String())
 }
 
 // migrate converts the old key=value file at oldPath into a cnf
-// file at newPath, and removes the old file once the new one is
-// fully written and verified. On any failure the old file is left
-// as it was.
-func migrate(oldPath, newPath string) (*Options, error) {
+// file at newPath, resolves the given model name - always
+// models.default today, the only entry a converted file holds -
+// and removes the old file once the new one is fully written and
+// verified. On any failure the old file is left as it was.
+func migrate(oldPath, newPath, model string) (*Options, error) {
 	fail := func(format string, args ...any) (*Options, error) {
 		return nil, fmt.Errorf("cannot migrate %s to %s: %s", oldPath, newPath, fmt.Sprintf(format, args...))
 	}
@@ -116,7 +117,7 @@ func migrate(oldPath, newPath string) (*Options, error) {
 
 	// Parse the candidate before it replaces anything, and check it
 	// against the old file's own values.
-	newOpts, err := parseConfig(newPath, cnfData)
+	newOpts, err := parseConfig(newPath, model, cnfData)
 	if err != nil {
 		return fail("converted file does not parse: %v", err)
 	}

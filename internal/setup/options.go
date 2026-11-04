@@ -55,38 +55,39 @@ type providerConfig struct {
 }
 
 // modelConfig is one entry under models: which provider serves
-// it, and the name sent to the API - the model's key when unset.
+// it, and the name sent to that provider - the model's name when
+// unset.
 type modelConfig struct {
-	Name     string `json:"name"`
-	Provider string `json:"provider"`
+	Provider      string `json:"provider"`
+	ProviderModel string `json:"provider-model"`
 }
 
-// Load reads the configuration from $HOME/.now.cnf. Missing keys get
-// their defaults; api-url is required. A leftover $HOME/.now is
-// converted to .now.cnf and then removed.
-func Load() (*Options, error) {
+// Load reads the configuration from $HOME/.now.cnf and resolves
+// the given model name. An empty name selects models.default.
+// A leftover $HOME/.now is converted to .now.cnf and then removed.
+func Load(model string) (*Options, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("cannot discover home directory: %w", err)
 	}
-	return loadHome(home)
+	return loadHome(home, model)
 }
 
 // loadHome picks the configuration under the given home directory:
 // .now.cnf when present, else a migrated .now, else a not-exist error
 // named after .now.cnf so the sample lands on the new path.
-func loadHome(home string) (*Options, error) {
+func loadHome(home, model string) (*Options, error) {
 	newPath := filepath.Join(home, ".now.cnf")
 	oldPath := filepath.Join(home, ".now")
 
 	if _, err := os.Stat(newPath); err == nil {
-		return LoadFrom(newPath)
+		return LoadFrom(newPath, model)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("cannot open %s: %w", newPath, err)
 	}
 
 	if _, err := os.Stat(oldPath); err == nil {
-		return migrate(oldPath, newPath)
+		return migrate(oldPath, newPath, model)
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("cannot open %s: %w", newPath, err)
 	}
@@ -104,19 +105,21 @@ func DefaultPath() (string, error) {
 }
 
 // LoadFrom reads the configuration in cnf format from the given
-// file path.
-func LoadFrom(path string) (*Options, error) {
+// file path and resolves the given model name. An empty name selects
+// models.default.
+func LoadFrom(path, model string) (*Options, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("cannot open %s: %w", path, err)
 	}
-	return parseConfig(path, data)
+	return parseConfig(path, model, data)
 }
 
 // parseConfig translates cnf text to json, decodes it, and checks
-// the result. The run uses models.default, resolved through its
-// provider into the flat Options. Unknown keys anywhere are errors.
-func parseConfig(path string, data []byte) (*Options, error) {
+// the result. The run uses the named models entry - models.default
+// when the name is empty - resolved through its provider into the
+// flat Options. Unknown keys anywhere are errors.
+func parseConfig(path, model string, data []byte) (*Options, error) {
 	jsonData, err := cnfembed.ToJSON(data, nil)
 	if err != nil {
 		return nil, fmt.Errorf("cannot parse %s: %w", path, err)
@@ -127,19 +130,22 @@ func parseConfig(path string, data []byte) (*Options, error) {
 	if err := dec.Decode(&cfg); err != nil {
 		return nil, fmt.Errorf("cannot parse %s: %w", path, err)
 	}
-	model, ok := cfg.Models["default"]
-	if !ok {
-		return nil, fmt.Errorf("cannot load %s: models.default is not set", path)
+	if model == "" {
+		model = "default"
 	}
-	if model.Provider == "" {
-		return nil, fmt.Errorf("cannot load %s: models.default has no provider", path)
-	}
-	prov, ok := cfg.Providers[model.Provider]
+	mdl, ok := cfg.Models[model]
 	if !ok {
-		return nil, fmt.Errorf("cannot load %s: models.default names unknown provider %q", path, model.Provider)
+		return nil, fmt.Errorf("cannot load %s: models.%s not found", path, model)
+	}
+	if mdl.Provider == "" {
+		return nil, fmt.Errorf("cannot load %s: models.%s has no provider", path, model)
+	}
+	prov, ok := cfg.Providers[mdl.Provider]
+	if !ok {
+		return nil, fmt.Errorf("cannot load %s: models.%s names unknown provider %q", path, model, mdl.Provider)
 	}
 	if prov.APIURL == "" {
-		return nil, fmt.Errorf("cannot load %s: providers.%q has no api-url", path, model.Provider)
+		return nil, fmt.Errorf("cannot load %s: providers.%q has no api-url", path, mdl.Provider)
 	}
 	if prov.APIType == "" {
 		prov.APIType = "completions-v1"
@@ -147,13 +153,13 @@ func parseConfig(path string, data []byte) (*Options, error) {
 	if prov.APIType != "completions-v1" {
 		return nil, fmt.Errorf("cannot load %s: unsupported api-type %q", path, prov.APIType)
 	}
-	if model.Name == "" {
-		model.Name = "default"
+	if mdl.ProviderModel == "" {
+		mdl.ProviderModel = model
 	}
 	return &Options{
 		APIURL:   prov.APIURL,
 		APIKey:   prov.APIKey,
-		APIModel: model.Name,
 		APIType:  prov.APIType,
+		APIModel: mdl.ProviderModel,
 	}, nil
 }
