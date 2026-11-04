@@ -69,7 +69,8 @@ promise.
   the applet list. The model thus knows the exact command surface of
   the environment it is scripting for.
 - `engine.Run` uses `Path` as the interpreter - `exec.CommandContext(ctx,
-  path, "sh", ...)`, plus `-x` when tracing (`-t`), with the script on
+  path, "sh", ...)`, plus `-x` when tracing (the CLI flag with the
+  same name), with the script on
   stdin and `opts.Args` delivered as `"$@"`.
 
 ## Applets are not shell builtins

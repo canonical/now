@@ -97,9 +97,9 @@ too (see _Concepts_: working directory for the leak history).
 - Dropped designs (do not resurrect without discussion): `-x` for
   execute grants (bwrap cannot express execute-only binds - a bound path
   keeps its permission bits, so an execute flag would be a fiction;
-  `-x` is reserved in case a future mechanism can express it), combined
-  forms like `-rw` (pointless once `-w` implies `-r`), and `-l` local
-  mode (replicated `-w /` exactly).
+  the `-x` reservation was later withdrawn and it is now the trace
+  flag, matching `sh -x`), combined forms like `-rw` (pointless once
+  `-w` implies `-r`), and `-l` local mode (replicated `-w /` exactly).
 
 ## Why these grants map to bwrap this way
 

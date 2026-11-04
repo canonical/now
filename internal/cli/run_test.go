@@ -189,7 +189,7 @@ func TestRunNoTerminalRejects(t *testing.T) {
 func TestRunTrace(t *testing.T) {
 	// -t threads through to the executed script: commands are traced
 	// to stderr, stdout still gets only the script's output.
-	stdout, stderr, err := e2e(t, []string{"-y", "-t", "do something"}, "---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
+	stdout, stderr, err := e2e(t, []string{"-y", "-x", "do something"}, "---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

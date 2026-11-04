@@ -311,26 +311,26 @@ func TestParseRequestOnly(t *testing.T) {
 }
 
 func TestParseBundledFlags(t *testing.T) {
-	// Boolean flags bundle: -qt sets both, in any order and mix.
-	opts := mustParse(t, []string{"-qt", "q"})
+	// Boolean flags bundle: -qx sets both, in any order and mix.
+	opts := mustParse(t, []string{"-qx", "q"})
 	if !opts.Quiet || !opts.Trace {
-		t.Errorf("-qt: Quiet=%v Trace=%v, want both true", opts.Quiet, opts.Trace)
+		t.Errorf("-qx: Quiet=%v Trace=%v, want both true", opts.Quiet, opts.Trace)
 	}
 
-	opts = mustParse(t, []string{"-tq", "q"})
+	opts = mustParse(t, []string{"-xq", "q"})
 	if !opts.Quiet || !opts.Trace {
-		t.Errorf("-tq: Quiet=%v Trace=%v, want both true", opts.Quiet, opts.Trace)
+		t.Errorf("-xq: Quiet=%v Trace=%v, want both true", opts.Quiet, opts.Trace)
 	}
 
-	opts = mustParse(t, []string{"-ytsn", "q"})
+	opts = mustParse(t, []string{"-yxsn", "q"})
 	if !opts.Yes || !opts.Trace || !opts.Sandbox || !opts.Network {
-		t.Errorf("-ytsn: not all flags set")
+		t.Errorf("-yxsn: not all flags set")
 	}
 
 	// A bundle with a non-boolean letter names it, so -r and friends
 	// make sense in the message.
-	_, err := cli.Parse([]string{"-qx", "q"}, strings.NewReader(""))
-	if err == nil || !strings.Contains(err.Error(), `"x" is not a boolean flag: "-qx"`) {
+	_, err := cli.Parse([]string{"-qz", "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), `"z" is not a boolean flag: "-qz"`) {
 		t.Fatalf("expected unknown flag error, got %v", err)
 	}
 	_, err = cli.Parse([]string{"-qr", "q"}, strings.NewReader(""))
@@ -339,10 +339,11 @@ func TestParseBundledFlags(t *testing.T) {
 	}
 
 	// Bundles are still only recognized before the request.
-	opts = mustParse(t, []string{"q", "-qt"})
+	opts = mustParse(t, []string{"q", "-q"})
 	if opts.Quiet || opts.Trace {
 		t.Errorf("bundle after request parsed as flags")
 	}
+	assertEqual(t, "Args", opts.Args, []string{"-q"})
 }
 
 func TestParseSandboxFlag(t *testing.T) {
@@ -436,7 +437,7 @@ func TestParseNetworkFlag(t *testing.T) {
 }
 
 func TestParseTraceFlag(t *testing.T) {
-	opts := mustParse(t, []string{"-t", "q", "a.txt"})
+	opts := mustParse(t, []string{"-x", "q", "a.txt"})
 	if !opts.Trace {
 		t.Errorf("-x: Trace = false, want true")
 	}
@@ -447,10 +448,50 @@ func TestParseTraceFlag(t *testing.T) {
 	}
 
 	// -x after the request is a path, not a flag.
-	opts = mustParse(t, []string{"q", "-t"})
+	opts = mustParse(t, []string{"q", "-x"})
 	if opts.Trace {
 		t.Errorf("-x after request: Trace = true, want false")
 	}
+	assertEqual(t, "Args", opts.Args, []string{"-x"})
+}
+
+func TestParsePlainAliasFlag(t *testing.T) {
+	// -t is a documented alias for -f plaintext.
+	opts := mustParse(t, []string{"-t", "q"})
+	assertEqual(t, "Format", opts.Format, "plaintext")
+	assertEqual(t, "Trace", opts.Trace, false)
+
+	// Bundling -t with a run flag puts both in one bundle; the
+	// conflict then names -t.
+	_, err := cli.Parse([]string{"-tb", "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "cannot use -b with -t") {
+		t.Fatalf("got %v, want -b conflict", err)
+	}
+
+	// Mixing -f and -t conflicts; the later flag is the offender.
+	_, err = cli.Parse([]string{"-f", "json", "-t", "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "cannot use -t with -f") {
+		t.Fatalf("got %v, want -f/-t conflict", err)
+	}
+	_, err = cli.Parse([]string{"-t", "-f", "json", "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "cannot use -f with -t") {
+		t.Fatalf("got %v, want -t/-f conflict", err)
+	}
+
+	// Setting a format twice conflicts, same flag or not.
+	_, err = cli.Parse([]string{"-f", "json", "-f", "md", "q"}, strings.NewReader(""))
+	if err == nil || !strings.Contains(err.Error(), "cannot use -f more than once") {
+		t.Fatalf("got %v, want repeated -f conflict", err)
+	}
+
+	// -t prevents -o's extension inference, like -f does.
+	opts = mustParse(t, []string{"-t", "-o", "notes.md", "q"})
+	assertEqual(t, "Format", opts.Format, "plaintext")
+	assertEqual(t, "Output", opts.Output, "notes.md")
+
+	// -t after the request is a path, not a flag.
+	opts = mustParse(t, []string{"q", "-t"})
+	assertEqual(t, "Format", opts.Format, "")
 	assertEqual(t, "Args", opts.Args, []string{"-t"})
 }
 
@@ -634,13 +675,16 @@ func TestParseFormatConflicts(t *testing.T) {
 		argv []string
 		want string
 	}{
-		{"-f -y", []string{"-f", "json", "-y", "q"}, "cannot use -y with -f or -o"},
-		{"-f -q", []string{"-f", "json", "-q", "q"}, "cannot use -q with -f or -o"},
-		{"-f -t", []string{"-f", "json", "-t", "q"}, "cannot use -t with -f or -o"},
-		{"-f -b", []string{"-f", "json", "-b", "q"}, "cannot use -b with -f or -o"},
-		{"-f -s", []string{"-f", "json", "-s", "q"}, "cannot use -s with -f or -o"},
-		{"-f -n", []string{"-f", "json", "-n", "q"}, "cannot use -n with -f or -o"},
-		{"-o -y", []string{"-o", "x.md", "-y", "q"}, "cannot use -y with -f or -o"},
+		{"-f -y", []string{"-f", "json", "-y", "q"}, "cannot use -y with -f"},
+		{"-f -q", []string{"-f", "json", "-q", "q"}, "cannot use -q with -f"},
+		{"-f -x", []string{"-f", "json", "-x", "q"}, "cannot use -x with -f"},
+		{"-f -b", []string{"-f", "json", "-b", "q"}, "cannot use -b with -f"},
+		{"-f -s", []string{"-f", "json", "-s", "q"}, "cannot use -s with -f"},
+		{"-f -n", []string{"-f", "json", "-n", "q"}, "cannot use -n with -f"},
+		{"-o -y", []string{"-o", "x.md", "-y", "q"}, "cannot use -y with -o"},
+		// -t is a format alias, so run flags conflict with it.
+		{"-t -q", []string{"-t", "-q", "q"}, "cannot use -q with -t"},
+		{"-t -x", []string{"-t", "-x", "q"}, "cannot use -x with -t"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -658,11 +702,11 @@ func TestParseFormatConflictsGrants(t *testing.T) {
 	// the conflict.
 	dir := t.TempDir()
 	_, err := cli.Parse([]string{"-f", "json", "-r", dir, "q"}, strings.NewReader(""))
-	if err == nil || !strings.Contains(err.Error(), "cannot use -r with -f or -o") {
+	if err == nil || !strings.Contains(err.Error(), "cannot use -r with -f") {
 		t.Fatalf("got %v, want -r conflict", err)
 	}
 	_, err = cli.Parse([]string{"-f", "json", "-w", dir, "q"}, strings.NewReader(""))
-	if err == nil || !strings.Contains(err.Error(), "cannot use -w with -f or -o") {
+	if err == nil || !strings.Contains(err.Error(), "cannot use -w with -f") {
 		t.Fatalf("got %v, want -w conflict", err)
 	}
 }
@@ -686,7 +730,7 @@ func TestParseFormatNonShRejectsCommands(t *testing.T) {
 	// command surface.
 	withFakeCommands(t, "fakeone")
 	_, err := cli.Parse([]string{"-f", "json", "-c", "fakeone", "q"}, strings.NewReader(""))
-	if err == nil || !strings.Contains(err.Error(), "cannot use -c with -f or -o") {
+	if err == nil || !strings.Contains(err.Error(), "cannot use -c with -f") {
 		t.Fatalf("got %v, want -c conflict", err)
 	}
 }

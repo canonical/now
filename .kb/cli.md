@@ -94,13 +94,17 @@ Order matters and each step's position is a decision:
 
 ## Write mode (-f / -o)
 
-`-f` selects an output format; `-o` selects an output file. Either
-puts **now** in write mode: content is generated and written out, and
-nothing is approved or executed. The run-control and confinement flags
-(`-y -q -t -b -s -r -w -n`) are rejected by the parser in this mode,
-since they assume execution. `-c` is allowed only with `sh`, where it
-feeds the script prompt as in run mode; a non-`sh` format has no
-command surface.
+`-f` selects an output format; `-o` selects an output file; `-t`
+is a documented alias for `-f plaintext` (see flag grammar).
+Either puts **now** in write mode: content is generated and written
+out, and nothing is approved or executed. The run-control and
+confinement flags (`-y -q -x -b -s -r -w -n`) are rejected by the
+parser in this mode, since they assume execution. The reject error
+names the flag that selected the mode (`cannot use -q with -t`, not
+a generic pair), since the user may have typed `-t` or `-o` and never
+`-f` at all. `-c` is allowed only
+with `sh`, where it feeds the script prompt as in run mode; a
+non-`sh` format has no command surface.
 
 Format resolution, in `Parse` after flag parsing:
 
@@ -117,6 +121,14 @@ Format resolution, in `Parse` after flag parsing:
   use -f`), since the user asked for a file we cannot classify.
 - `-f` always wins over `-o`'s extension; there is no cross-check
   (`-f json -o x.md` writes JSON to `x.md`).
+- `-t` aliases `-f plaintext`, calling the same `setFormat` with the
+  flag name swapped. All `-f` semantics carry over: it suppresses
+  `-o`'s extension inference. Setting a format twice conflicts -
+  `cannot use -f more than once` for the same flag,
+  `cannot use -t with -f` otherwise. `-t` is
+  documented in the usage text (unlike the `"shell"` alias). No
+  format is special-cased downstream - `plaintext` rides the same
+  format-mode path as any other format token.
 
 Three modes branch in `cli.Run` on the resolved `Format`:
 
@@ -170,12 +182,17 @@ does not pre-`Stat` the file (it is being created). Success is silent.
 - Flags are recognized **only before the request**; everything after
   it is an argument. Pinned by tests (e.g. `-w` after the request is a
   plain argument).
-- `-y` approve, `-q` approve-and-hide, `-t` trace, `-c cmd,...`,
+- `-y` approve, `-q` approve-and-hide, `-x` trace, `-c cmd,...`,
   `-r path`, `-w path`, `-n` network, `-s` sandbox, `-f fmt`,
-  `-o file`, `-p file` read request from a prompt text file,
-  `-i file` read a reference file for the prompt.
-  `=`-forms work for value-taking flags. Grants repeat and
+  `-o file`, `-t` (alias for `-f plaintext`), `-p file` read request
+  from a prompt text file, `-i file` read a reference file for the
+  prompt. `=`-forms work for value-taking flags. Grants repeat and
   accumulate.
+- `-x` matches the shell flag it passes through: with `-x`, the
+  script runs under `sh -x`, so each command prints to stderr as it
+  executes. It was named `-t` before; that spelling was freed for the
+  `-f plaintext` alias, since plain text is the common write-mode
+  case and earned the short flag.
 - `-i <path>` reads a reference file into the prompt (see
   `.kb/prompt.md`): the content is listed under the path as given,
   and the model may refer to the file by that path in the script.
@@ -206,16 +223,20 @@ does not pre-`Stat` the file (it is being created). Success is silent.
   then removed - do not resurrect without discussing):
   - Labeled path sets (`1: ... 2: ...`) - superseded when arguments
     became a flat, meaning-free list.
-  - `-x` trace - renamed to `-t` to free `-x` for a *possible future*
-    execution-grant flag; bwrap cannot express execute-only binds
-    today (see `.kb/sandbox.md`).
+  - `-x` trace - first named `-t`, then renamed to `-x` to match the
+    underlying shell flag it passes through (`sh -x`); the old `-x`
+    execute-grant reservation never materialized and is withdrawn.
+    The freed `-t` became the documented `-f plaintext` alias.
   - `-w` commands - renamed to `-c`; `-w` now means writable grant.
   - `-l` local mode (all writable, network off) - deleted as a
     redundant spelling of `-w /`.
   - Usage on error - usage prints only on explicit `--help` or no
     arguments; errors are one line, no appended usage.
 - `Options` is intentionally minimal; parser bookkeeping must not
-  leak into it (stdin is handled inline during parsing).
+  leak into it (stdin is handled inline during parsing). One
+  deliberate exception: `FormatFlag` records the flag that selected
+  the format (`-f`, `-t`, or `-o`), set inside `setFormat`, so
+  conflict errors name a flag the user typed.
 
 ## Buffered mode (-b)
 
@@ -240,7 +261,7 @@ calling `Approve`, so the review and the execution share one stream:
   script. With `-b` it lands in the buffer; with plain `-y` on
   stderr. Quiet is the only mode that suppresses it.
 
-`-b` composes with `-t`: trace output also goes to the buffer and
+`-b` composes with `-x`: trace output also goes to the buffer and
 only appears on failure.
 
 ## Approval (Approve)

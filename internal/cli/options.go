@@ -63,7 +63,7 @@ type Options struct {
 	Quiet bool
 
 	// Trace prints each script command to stderr as it executes,
-	// like the shell's -x.
+	// like the shell's -x; the flag matches.
 	Trace bool
 
 	// Sandbox confines the script execution with bwrap even without
@@ -92,6 +92,11 @@ type Options struct {
 	// write it out. Resolved from -f, or inferred from -o's extension
 	// when -f is absent.
 	Format string
+
+	// FormatFlag is the flag that selected Format: "-f", "-t", or
+	// "-o" via extension inference. Empty in run mode. Conflict
+	// errors name it, so they reference a flag the user typed.
+	FormatFlag string
 
 	// Output is the file path to write the generated script or
 	// formatted content to. Empty means write to stdout. Set by -o.
@@ -144,7 +149,7 @@ Options:
 Running control:
   -y                Auto-approve the generated script without asking.
   -q                Auto-approve and also hide the script before running it.
-  -t                Trace each script command to stderr as it executes.
+  -x                Trace each script command to stderr as it executes.
   -b                Buffer script output and only show it on failure.
   -c <cmd>,...      External command names from $PATH for the script to use.
 
@@ -157,6 +162,7 @@ Sandbox mode:
 Output mode:
   -o <path>         Just write the content. Default -f from file extension.
   -f <format>       Just output content in the given format.
+  -t                Same as ` + "`-f plaintext`" + `.
 
 Boolean flags may be bundled together.
 `
@@ -259,7 +265,7 @@ func readStdin(r io.Reader) ([]string, error) {
 }
 
 // parseFlags extracts leading flags; the request and paths follow.
-// Boolean flags may be bundled, as in -qt; flags taking a value cannot.
+// Boolean flags may be bundled, as in -qx; flags taking a value cannot.
 func parseFlags(argv []string, opts *Options) ([]string, error) {
 	i := 0
 	for i < len(argv) {
@@ -270,9 +276,7 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 			// text above. They are kept as quiet conveniences; do not
 			// add them to the documented options.
 			return nil, &HelpRequested{}
-		// -r, -w, -c, and -i stay plain and separate: -w implies read too,
-		// and we do not want to take over -x, as it may come some day
-		// with an execution semantics that bwrap alone cannot express.
+		// -r, -w, -c, and -i stay plain and separate: -w implies read too.
 		case arg == "-i":
 			if i+1 >= len(argv) {
 				return nil, parseErrf("-i requires a file path")
@@ -326,11 +330,11 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 				return nil, parseErrf("-f requires a format")
 			}
 			i++
-			if err := setFormat(opts, argv[i]); err != nil {
+			if err := setFormat(opts, "-f", argv[i]); err != nil {
 				return nil, err
 			}
 		case strings.HasPrefix(arg, "-f="):
-			if err := setFormat(opts, strings.TrimPrefix(arg, "-f=")); err != nil {
+			if err := setFormat(opts, "-f", strings.TrimPrefix(arg, "-f=")); err != nil {
 				return nil, err
 			}
 		case arg == "-o":
@@ -356,8 +360,12 @@ func parseFlags(argv []string, opts *Options) ([]string, error) {
 					opts.Yes = true
 				case 'q':
 					opts.Quiet = true
-				case 't':
+				case 'x':
 					opts.Trace = true
+				case 't':
+					if err := setFormat(opts, "-t", "plaintext"); err != nil {
+						return nil, err
+					}
 				case 'b':
 					opts.Buffered = true
 				case 's':
@@ -464,14 +472,20 @@ func addCommands(opts *Options, list string) error {
 // alphanumerics, optionally separated by dots or dashes.
 var formatRe = regexp.MustCompile(`^[a-z0-9]+([.-][a-z0-9]+)*$`)
 
-// setFormat validates and records the -f value. The value is taken
-// verbatim: -f does not lowercase, so an uppercase or otherwise
-// invalid value is an error rather than a silent fix. "shell" is a
-// quiet convenience alias for "sh" (the only one; "bash" is not, as
-// it implies a non-POSIX syntax). That alias is undocumented.
-func setFormat(opts *Options, val string) error {
+// setFormat validates and records the format selected by the given
+// flag (-f or -t). The value is verbatim, never lowercased: invalid
+// input is an error, not a silent fix. "shell" is a quiet alias for
+// "sh" (the only one; "bash" is not, as it implies non-POSIX
+// syntax). Setting a format twice is a conflict, whatever the flags.
+func setFormat(opts *Options, flag string, val string) error {
 	if val == "" {
 		return parseErrf("-f requires a format")
+	}
+	if opts.FormatFlag != "" {
+		if flag == opts.FormatFlag {
+			return parseErrf("cannot use %s more than once", flag)
+		}
+		return parseErrf("cannot use %s with %s", flag, opts.FormatFlag)
 	}
 	if val == "shell" {
 		val = "sh"
@@ -479,35 +493,39 @@ func setFormat(opts *Options, val string) error {
 	if !formatRe.MatchString(val) {
 		return parseErrf("-f: invalid format %q", val)
 	}
+	opts.FormatFlag = flag
 	opts.Format = val
 	return nil
 }
 
-// resolveFormat infers the format from -o's extension when -f was not
-// given. The extension is lowercased before matching the format
-// constraint; an empty extension means "sh" (write the script). An
-// extension that does not match the constraint is an error, since the
-// user asked for a file we cannot classify.
+// resolveFormat infers the format from -o's extension when -f was
+// not given, and records -o as the selecting flag so conflict
+// errors name it. The extension is lowercased before matching
+// the format constraint; an empty extension means "sh" (write the
+// script). An extension that does not match the constraint is an
+// error, since the user asked for a file we cannot classify.
 func resolveFormat(opts *Options) error {
 	if opts.Format != "" || opts.Output == "" {
 		return nil
 	}
 	ext := strings.ToLower(strings.TrimPrefix(filepath.Ext(opts.Output), "."))
 	if ext == "" {
+		opts.FormatFlag = "-o"
 		opts.Format = "sh"
 		return nil
 	}
 	if !formatRe.MatchString(ext) {
 		return parseErrf("cannot infer output format from -o, use -f")
 	}
+	opts.FormatFlag = "-o"
 	opts.Format = ext
 	return nil
 }
 
-// checkFormatConflicts rejects flags that make no sense once a format
-// is selected: the run-control and confinement flags all assume the
-// script will execute, which write mode never does. -c is allowed only
-// for "sh", where it feeds the script prompt as in run mode.
+// checkFormatConflicts rejects flags that assume execution once a
+// format is selected; write mode never executes. -c is allowed only
+// for "sh". Errors name opts.FormatFlag so they point at what the
+// user typed.
 func checkFormatConflicts(opts *Options) error {
 	if opts.Format == "" {
 		return nil
@@ -518,7 +536,7 @@ func checkFormatConflicts(opts *Options) error {
 	}{
 		{"-y", opts.Yes},
 		{"-q", opts.Quiet},
-		{"-t", opts.Trace},
+		{"-x", opts.Trace},
 		{"-b", opts.Buffered},
 		{"-s", opts.Sandbox},
 		{"-n", opts.Network},
@@ -526,11 +544,11 @@ func checkFormatConflicts(opts *Options) error {
 		{"-w", len(opts.Writable) > 0},
 	} {
 		if bad.set {
-			return parseErrf("cannot use %s with -f or -o", bad.flag)
+			return parseErrf("cannot use %s with %s", bad.flag, opts.FormatFlag)
 		}
 	}
 	if opts.Format != "sh" && len(opts.Commands) > 0 {
-		return parseErrf("cannot use -c with -f or -o")
+		return parseErrf("cannot use -c with %s", opts.FormatFlag)
 	}
 	return nil
 }
