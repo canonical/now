@@ -43,7 +43,7 @@ type RunOptions struct {
 	// script for review, prompts, and errors.
 	Stdout io.Writer
 	Stderr io.Writer
-	// SetupPath selects the configuration file; empty means $HOME/.now.
+	// SetupPath selects the configuration file; empty means $HOME/.now.cnf.
 	SetupPath string
 	// TTY overrides where approval is read from; the controlling
 	// terminal by default. A test seam, like ApprovalOptions.TTY.
@@ -55,13 +55,16 @@ type RunOptions struct {
 // key is a commented placeholder, so an unedited sample fails loading
 // with the honest missing-key error.
 const sampleScript = `
-# CONFIGURATION IS MISSING: This script creates a sample at $HOME/.now
+# CONFIGURATION IS MISSING: This script creates a sample at $HOME/.now.cnf
 
 cat > "$1" <<'END'
-#api-url=http://127.0.0.1:11434
-#api-key=
-#api-model=local
-#api-type=completions-v1
+#providers.local:
+#	api-url: "http://127.0.0.1:11434"
+#	api-key: ""
+#	api-type: "completions-v1"
+#
+#models.default:
+#	provider: "local"
 END
 echo "Sample configuration saved, adjust as necessary: $1"
 `

@@ -79,7 +79,7 @@ Options:
 Running control:
   -y                Auto-approve the generated script without asking.
   -q                Auto-approve and also hide the script before running it.
-  -t                Trace each script command to stderr as it executes.
+  -x                Trace each script command to stderr as it executes.
   -b                Buffer script output and only show it on failure.
   -c <cmd>,...      External command names from $PATH for the script to use.
 
@@ -92,6 +92,7 @@ Sandbox mode:
 Output mode:
   -o <path>         Just write the content. Default -f from file extension.
   -f <format>       Just output content in the given format.
+  -t                Same as `-f plaintext`.
 
 Boolean flags may be bundled together.
 ```
@@ -99,15 +100,17 @@ Boolean flags may be bundled together.
 
 ## Configuration
 
-The configuration is loaded from `$HOME/.now` using a simple _key=value_ format:
+The configuration is loaded from `$HOME/.now.cnf` in the [cnf](https://github.com/canonical/cnf) format:
 ```
-api-url=http://127.0.0.1:11434
-api-key=abc...
-api-model=default
-api-type=completions-v1
+providers.local:
+    api-url: "http://127.0.0.1:11434"
+    api-key: "abc..."
+
+models.default:
+    name: "my-model"
+    provider: "local"
 ```
-The `api-model` key selects the model name sent to the API. It defaults to `default` if unset.
-The `api-type` key selects the API kind; only `completions-v1` is supported for now, and it is the default, so the key may be omitted.
+The model `name` is optional and defaults to the model key itself if unset.
 
 If you run _now_ without a valid configuration, it will propose a script for creating it.
 
@@ -300,9 +303,10 @@ $ now -f json "print A to B, compact" A=1 B=5
 
 Both arguments and standard input work as usual:
 ```
-$ echo A=1 | now -f txt "print A to B, compact" B=5 -
+$ echo A=1 | now -t "print A to B, compact" B=5 -
 1 2 3 4 5
 ```
+The `-t` flag is a short alias for `-f plaintext`.
 
 Any of these can also be directly written onto a file:
 ```
@@ -328,10 +332,12 @@ echo "Hello world!"
 
 ### Tracing, quietly, on errors
 
+The `-q` suppresses approval and output, `-b` means buffered and flushed
+on errors, and `-x` is forwarded to the shell to enable tracing:
 ```
-$ ./now -tqb "print the cwd"
+$ ./now -qbx "print the cwd"
 
-$ ./now -tqb "print the cwd then fail"
+$ ./now -qbx "print the cwd then fail"
 + pwd
 /home/ubuntu
 + exit 1
@@ -463,7 +469,7 @@ any-store-cli2 library.db -e 'db.readers.find({"city":"Berlin"}).count()'
 ### Arbitrary content summary
 
 ```
-$ now --help 2>&1 | now -f txt "why would I use this, in few words?" -
+$ now --help 2>&1 | now -t "why would I use this, in few words?" -
 You use `now` when you want to turn a natural-language sentence into a
 small, reviewable shell script that runs in a sandbox — one-shot, no
 multi-turn LLM, no hidden tool calls. You see the script before it

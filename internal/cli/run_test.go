@@ -27,6 +27,20 @@ import (
 	"github.com/canonical/now/internal/cli"
 )
 
+// setupContent builds the cnf configuration text pointing the loader
+// at the fake API. The model is the name of models.default; an empty
+// model omits the name key.
+func setupContent(url, model string) string {
+	content := "providers.local:\n" +
+		"    api-url: \"" + url + "\"\n" +
+		"\nmodels.default:\n" +
+		"    provider: \"local\"\n"
+	if model != "" {
+		content += "    name: \"" + model + "\"\n"
+	}
+	return content
+}
+
 // e2e starts a fake API replying with the given script, writes a setup
 // file pointing at it, and runs the full cycle.
 func e2e(t *testing.T, argv []string, reply string) (string, string, error) {
@@ -38,8 +52,8 @@ func e2e(t *testing.T, argv []string, reply string) (string, string, error) {
 	}
 	t.Cleanup(func() { _ = f.Stop() })
 
-	setupPath := filepath.Join(t.TempDir(), ".now")
-	content := "api-url=" + url + "\napi-model=test\n"
+	setupPath := filepath.Join(t.TempDir(), ".now.cnf")
+	content := setupContent(url, "test")
 	if err := os.WriteFile(setupPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("cannot write setup: %v", err)
 	}
@@ -90,8 +104,8 @@ func TestRunAborted(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = f.Stop() })
 
-	setupPath := filepath.Join(t.TempDir(), ".now")
-	content := "api-url=" + url + "\napi-model=test\n"
+	setupPath := filepath.Join(t.TempDir(), ".now.cnf")
+	content := setupContent(url, "test")
 	if err := os.WriteFile(setupPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("cannot write setup: %v", err)
 	}
@@ -136,8 +150,8 @@ func TestRunBufferedAloneShowsReview(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = f.Stop() })
 
-	setupPath := filepath.Join(t.TempDir(), ".now")
-	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\n"), 0o600); err != nil {
+	setupPath := filepath.Join(t.TempDir(), ".now.cnf")
+	if err := os.WriteFile(setupPath, []byte(setupContent(url, "")), 0o600); err != nil {
 		t.Fatalf("cannot write setup: %v", err)
 	}
 
@@ -209,8 +223,8 @@ func TestRunInputs(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = f.Stop() })
 
-	setupPath := filepath.Join(t.TempDir(), ".now")
-	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\napi-model=test\n"), 0o600); err != nil {
+	setupPath := filepath.Join(t.TempDir(), ".now.cnf")
+	if err := os.WriteFile(setupPath, []byte(setupContent(url, "test")), 0o600); err != nil {
 		t.Fatalf("cannot write setup: %v", err)
 	}
 
@@ -267,8 +281,8 @@ func TestRunScriptReadsStdin(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = f.Stop() })
 
-	setupPath := filepath.Join(t.TempDir(), ".now")
-	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\napi-model=test\n"), 0o600); err != nil {
+	setupPath := filepath.Join(t.TempDir(), ".now.cnf")
+	if err := os.WriteFile(setupPath, []byte(setupContent(url, "test")), 0o600); err != nil {
 		t.Fatalf("cannot write setup: %v", err)
 	}
 
@@ -297,8 +311,8 @@ func TestRunDashDrainsStdin(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = f.Stop() })
 
-	setupPath := filepath.Join(t.TempDir(), ".now")
-	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\napi-model=test\n"), 0o600); err != nil {
+	setupPath := filepath.Join(t.TempDir(), ".now.cnf")
+	if err := os.WriteFile(setupPath, []byte(setupContent(url, "test")), 0o600); err != nil {
 		t.Fatalf("cannot write setup: %v", err)
 	}
 
@@ -336,7 +350,7 @@ func TestRunSampleConfigOffer(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(home, ".now"))
+	data, err := os.ReadFile(filepath.Join(home, ".now.cnf"))
 	if err != nil {
 		t.Fatalf("cannot read sample: %v", err)
 	}
@@ -345,15 +359,18 @@ func TestRunSampleConfigOffer(t *testing.T) {
 	// loading with the honest missing-key error. Changing it here is
 	// deliberate, not accidental.
 	wantContent := "" +
-		"#api-url=http://127.0.0.1:11434\n" +
-		"#api-key=\n" +
-		"#api-model=local\n" +
-		"#api-type=completions-v1\n"
+		"#providers.local:\n" +
+		"#\tapi-url: \"http://127.0.0.1:11434\"\n" +
+		"#\tapi-key: \"\"\n" +
+		"#\tapi-type: \"completions-v1\"\n" +
+		"#\n" +
+		"#models.default:\n" +
+		"#\tprovider: \"local\"\n"
 	assertEqual(t, "sample content", string(data), wantContent)
 	if !strings.Contains(stderr.String(), "adjust as necessary") {
 		t.Errorf("sample script not shown for review: %q", stderr.String())
 	}
-	assertEqual(t, "stdout", stdout.String(), "Sample configuration saved, adjust as necessary: "+filepath.Join(home, ".now")+"\n")
+	assertEqual(t, "stdout", stdout.String(), "Sample configuration saved, adjust as necessary: "+filepath.Join(home, ".now.cnf")+"\n")
 }
 
 func TestRunSampleConfigCancel(t *testing.T) {
@@ -372,7 +389,7 @@ func TestRunSampleConfigCancel(t *testing.T) {
 	if !errors.Is(err, cli.ErrAborted) {
 		t.Fatalf("expected ErrAborted, got %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".now")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(home, ".now.cnf")); !os.IsNotExist(err) {
 		t.Errorf("sample written despite cancel")
 	}
 }
@@ -528,8 +545,8 @@ func TestRunFormatShArgsAreData(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = f.Stop() })
 
-	setupPath := filepath.Join(t.TempDir(), ".now")
-	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\napi-model=test\n"), 0o600); err != nil {
+	setupPath := filepath.Join(t.TempDir(), ".now.cnf")
+	if err := os.WriteFile(setupPath, []byte(setupContent(url, "test")), 0o600); err != nil {
 		t.Fatalf("cannot write setup: %v", err)
 	}
 
@@ -582,7 +599,7 @@ func TestRunSampleConfigNotOfferedUnattended(t *testing.T) {
 	if strings.Contains(stderr.String(), "adjust as necessary") {
 		t.Errorf("sample offered despite -y: %q", stderr.String())
 	}
-	if _, err2 := os.Stat(filepath.Join(home, ".now")); !os.IsNotExist(err2) {
+	if _, err2 := os.Stat(filepath.Join(home, ".now.cnf")); !os.IsNotExist(err2) {
 		t.Errorf("sample written despite -y")
 	}
 }
@@ -598,8 +615,8 @@ func TestRunInputsDoNotEnforceSandbox(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = f.Stop() })
 
-	setupPath := filepath.Join(t.TempDir(), ".now")
-	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\napi-model=test\n"), 0o600); err != nil {
+	setupPath := filepath.Join(t.TempDir(), ".now.cnf")
+	if err := os.WriteFile(setupPath, []byte(setupContent(url, "test")), 0o600); err != nil {
 		t.Fatalf("cannot write setup: %v", err)
 	}
 
@@ -643,8 +660,8 @@ func TestRunSandboxFailsBeforeAPICall(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = f.Stop() })
 
-	setupPath := filepath.Join(t.TempDir(), ".now")
-	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\n"), 0o600); err != nil {
+	setupPath := filepath.Join(t.TempDir(), ".now.cnf")
+	if err := os.WriteFile(setupPath, []byte(setupContent(url, "")), 0o600); err != nil {
 		t.Fatalf("cannot write setup: %v", err)
 	}
 
@@ -685,8 +702,8 @@ func TestRunBusyboxFailsBeforeAPICall(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = f.Stop() })
 
-	setupPath := filepath.Join(t.TempDir(), ".now")
-	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\n"), 0o600); err != nil {
+	setupPath := filepath.Join(t.TempDir(), ".now.cnf")
+	if err := os.WriteFile(setupPath, []byte(setupContent(url, "")), 0o600); err != nil {
 		t.Fatalf("cannot write setup: %v", err)
 	}
 
@@ -718,8 +735,8 @@ func TestRunNetworkEnforcesSandbox(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = f.Stop() })
 
-	setupPath := filepath.Join(t.TempDir(), ".now")
-	if err := os.WriteFile(setupPath, []byte("api-url="+url+"\n"), 0o600); err != nil {
+	setupPath := filepath.Join(t.TempDir(), ".now.cnf")
+	if err := os.WriteFile(setupPath, []byte(setupContent(url, "")), 0o600); err != nil {
 		t.Fatalf("cannot write setup: %v", err)
 	}
 
@@ -764,8 +781,8 @@ func TestRunStdinArgs(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = f.Stop() })
 
-	setupPath := filepath.Join(t.TempDir(), ".now")
-	content := "api-url=" + url + "\napi-model=test\n"
+	setupPath := filepath.Join(t.TempDir(), ".now.cnf")
+	content := setupContent(url, "test")
 	if err := os.WriteFile(setupPath, []byte(content), 0o600); err != nil {
 		t.Fatalf("cannot write setup: %v", err)
 	}
