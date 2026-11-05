@@ -763,6 +763,50 @@ func TestRunNetworkEnforcesSandbox(t *testing.T) {
 	}
 }
 
+func TestRunPassthrough(t *testing.T) {
+	// The provider and model passthrough maps merge - model over
+	// provider - and land in the request body verbatim.
+	f := completions.NewFakeLLM("---SCRIPT-START---\necho hello\n---SCRIPT-END---\n")
+	url, err := f.Start()
+	if err != nil {
+		t.Fatalf("cannot start fake: %v", err)
+	}
+	t.Cleanup(func() { _ = f.Stop() })
+
+	setupPath := filepath.Join(t.TempDir(), ".now.cnf")
+	content := "providers.local:\n" +
+		"    api-url: \"" + url + "\"\n" +
+		"    passthrough:\n" +
+		"        temperature: 0.9\n" +
+		"\nmodels.default:\n" +
+		"    provider: \"local\"\n" +
+		"    passthrough:\n" +
+		"        temperature: 0.2\n" +
+		"        max_tokens: 4096\n"
+	if err := os.WriteFile(setupPath, []byte(content), 0o600); err != nil {
+		t.Fatalf("cannot write setup: %v", err)
+	}
+
+	var stdout, stderr strings.Builder
+	err = cli.Run(context.Background(), cli.RunOptions{
+		Argv:      []string{"-y", "do something"},
+		Stdin:     strings.NewReader(""),
+		Stdout:    &stdout,
+		Stderr:    &stderr,
+		SetupPath: setupPath,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "stdout", stdout.String(), "hello\n")
+	req := f.LastRequest()
+	if req == nil {
+		t.Fatalf("no request recorded")
+	}
+	assertEqual(t, "temperature", req["temperature"], any(0.2))
+	assertEqual(t, "max_tokens", req["max_tokens"], any(float64(4096)))
+}
+
 func TestRunModelSelection(t *testing.T) {
 	// -m resolves the models.other entry; the request body carries
 	// its name, not the flag value.

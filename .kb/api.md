@@ -62,6 +62,12 @@ resolution):
   backend exists; the key exists to make the extension seam real
   rather than hypothetical, and its validation is where backend
   selection will dispatch.
+- `passthrough` (`providers.<name>` and `models.<name>`) -
+  request body settings passed through verbatim to the provider,
+  any shape it accepts. The model's map merges over the
+  provider's, deeply; when the request is assembled, the fields
+  the client owns (`model`, `messages`) overwrite the
+  passthrough.
 
 ## §5 - Error surface
 

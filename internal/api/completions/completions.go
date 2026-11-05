@@ -29,10 +29,38 @@ import (
 	"github.com/canonical/now/internal/setup"
 )
 
-// request is the body sent to /v1/chat/completions.
+// request is the body sent to /v1/chat/completions: the fields
+// now owns, with the passthrough settings overlaid on top by
+// the custom MarshalJSON below.
 type request struct {
-	Model    string           `json:"model"`
-	Messages []prompt.Message `json:"messages"`
+	Model       string                     `json:"model"`
+	Messages    []prompt.Message           `json:"messages"`
+	Passthrough map[string]json.RawMessage `json:"-"`
+}
+
+// MarshalJSON spells the request as one object: the passthrough
+// keys first, then model and messages overlaid on top - anything
+// now owns wins over the passthrough.
+func (r request) MarshalJSON() ([]byte, error) {
+	merged := make(map[string]json.RawMessage, len(r.Passthrough)+2)
+	for key, val := range r.Passthrough {
+		merged[key] = val
+	}
+	if r.Model != "" {
+		val, err := json.Marshal(r.Model)
+		if err != nil {
+			return nil, err
+		}
+		merged["model"] = val
+	}
+	if len(r.Messages) > 0 {
+		val, err := json.Marshal(r.Messages)
+		if err != nil {
+			return nil, err
+		}
+		merged["messages"] = val
+	}
+	return json.Marshal(merged)
 }
 
 // response is the subset of the completion response we consume.
@@ -47,7 +75,7 @@ type response struct {
 // Complete sends the messages to the API described by opts and returns the
 // content of the first choice.
 func Complete(ctx context.Context, opts setup.Options, messages []prompt.Message) (string, error) {
-	body, err := json.Marshal(request{Model: opts.APIModel, Messages: messages})
+	body, err := json.Marshal(request{Model: opts.APIModel, Messages: messages, Passthrough: opts.Passthrough})
 	if err != nil {
 		return "", fmt.Errorf("cannot encode request: %w", err)
 	}

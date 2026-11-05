@@ -101,6 +101,8 @@ Boolean flags may be bundled together.
 
 ## Configuration
 
+If you run _now_ without a valid configuration, it will propose a script for creating it.
+
 The configuration is loaded from `$HOME/.now.cnf` in the [cnf](https://github.com/canonical/cnf) format:
 ```
 providers.local:
@@ -114,7 +116,9 @@ models.default:
 The `-m` option allows selecting a model other than `default` at runtime.
 The `provider-model` field is optional and defaults to the model name itself if unset.
 
-If you run _now_ without a valid configuration, it will propose a script for creating it.
+Both providers and models may hold a `passthrough` map of extra request body settings, sent
+as-is to the API. The model passthrough map merges deeply over the provider's, and then the
+internal request map is merged over the resulting map.
 
 
 ### Recommended models

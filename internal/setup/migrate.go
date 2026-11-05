@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 
 	"github.com/canonical/now/internal/cnfembed"
@@ -121,7 +122,7 @@ func migrate(oldPath, newPath, model string) (*Options, error) {
 	if err != nil {
 		return fail("converted file does not parse: %v", err)
 	}
-	if *newOpts != *oldOpts {
+	if !reflect.DeepEqual(newOpts, oldOpts) {
 		return fail("converted file does not match the old configuration")
 	}
 

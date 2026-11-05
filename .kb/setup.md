@@ -49,18 +49,52 @@ what a run uses:
 - `providers.<name>.api-type` - API dialect selector. Only
   `completions-v1` is supported; any other value rejected at load
   time. Defaults to `completions-v1`.
+- `providers.<name>.passthrough` - Request body settings sent
+  verbatim for every model on this provider. See "Passthrough".
 - `models.<name>.provider` - The providers entry that serves this
   model, **required**. Resolution fails loudly when missing or
   unknown.
 - `models.<name>.provider-model` - The model name sent to the
   provider's API. Optional; defaults to the entry's name itself.
+- `models.<name>.passthrough` - Request body settings sent
+  verbatim for this model, merged over the provider's.
+  See "Passthrough".
+
+## Passthrough
+
+Both the provider and the model may hold a `passthrough` map of
+request body settings. The values are the provider's business -
+now decodes them as raw json and never inspects the shape, so any
+setting a provider accepts can be configured. At resolution the
+model's map merges over the provider's, deeply: maps on both
+sides merge recursively, and any other value the model holds
+replaces the provider's wholesale.
+
+No key is reserved: anything can be set, and when the request is
+assembled the fields now owns - `model` and `messages` - overwrite
+the passthrough. The OpenRouter routing object is the canonical
+use - the provider holds the account-wide policy, the model pins
+its backend:
+
+    providers.openrouter:
+        api-url: "https://openrouter.ai/api/v1"
+        passthrough:
+            provider:
+                allow-fallbacks: false
+
+    models.big:
+        provider: "openrouter"
+        passthrough:
+            provider:
+                order: ["google-vertex/us-east5"]
 
 ## Resolution
 
 `setup.Load(model)` - `LoadFrom(path, model)` for an explicit path
 - resolves `models.<name>`, or `models.default` when the name is
 empty, through its provider into the flat `Options`
-(`APIURL`/`APIKey`/`APIModel`/`APIType`) used by the completions
+(`APIURL`/`APIKey`/`APIModel`/`APIType`, plus the resolved
+`Passthrough` map) used by the completions
 client. The `-m` option passes its key through; `-m` twice is an
 ambiguous parse error.
 

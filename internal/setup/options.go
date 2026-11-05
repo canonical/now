@@ -37,6 +37,9 @@ type Options struct {
 	// APIType selects the API kind; only "completions-v1" (the completions API)
 	// is supported for now.
 	APIType string
+	// Passthrough holds the merged provider and model passthrough
+	// maps, sent verbatim in the request body.
+	Passthrough map[string]json.RawMessage
 }
 
 // config is the on-disk form of the configuration, decoded from
@@ -47,19 +50,21 @@ type config struct {
 }
 
 // providerConfig is one entry under providers: the endpoint the
-// requests go to.
+// requests go to, plus passthrough keys for every model on it.
 type providerConfig struct {
-	APIURL  string `json:"api-url"`
-	APIKey  string `json:"api-key"`
-	APIType string `json:"api-type"`
+	APIURL      string                     `json:"api-url"`
+	APIKey      string                     `json:"api-key"`
+	APIType     string                     `json:"api-type"`
+	Passthrough map[string]json.RawMessage `json:"passthrough"`
 }
 
-// modelConfig is one entry under models: which provider serves
-// it, and the name sent to that provider - the model's name when
-// unset.
+// modelConfig is one entry under models: which provider serves it,
+// the name sent to that provider when it differs, and passthrough
+// keys specific to this model.
 type modelConfig struct {
-	Provider      string `json:"provider"`
-	ProviderModel string `json:"provider-model"`
+	Provider      string                     `json:"provider"`
+	ProviderModel string                     `json:"provider-model"`
+	Passthrough   map[string]json.RawMessage `json:"passthrough"`
 }
 
 // Load reads the configuration from $HOME/.now.cnf and resolves
@@ -156,10 +161,15 @@ func parseConfig(path, model string, data []byte) (*Options, error) {
 	if mdl.ProviderModel == "" {
 		mdl.ProviderModel = model
 	}
+	passthrough, err := mergePassthrough(model, prov.Passthrough, mdl.Passthrough)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
 	return &Options{
-		APIURL:   prov.APIURL,
-		APIKey:   prov.APIKey,
-		APIType:  prov.APIType,
-		APIModel: mdl.ProviderModel,
+		APIURL:      prov.APIURL,
+		APIKey:      prov.APIKey,
+		APIType:     prov.APIType,
+		APIModel:    mdl.ProviderModel,
+		Passthrough: passthrough,
 	}, nil
 }

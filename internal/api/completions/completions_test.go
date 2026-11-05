@@ -17,6 +17,7 @@ package completions_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -51,6 +52,29 @@ func TestCompleteSuccess(t *testing.T) {
 	assertEqual(t, "len(messages)", len(msgs), 2)
 	assertEqual(t, "system message", msgs[0].(map[string]any)["content"], "sys")
 	assertEqual(t, "user message", msgs[1].(map[string]any)["content"], "hello")
+}
+
+func TestCompletePassthrough(t *testing.T) {
+	// Passthrough keys ride in the body alongside model and
+	// messages, verbatim.
+	f, url := startFake(t, "---SCRIPT-START---\necho hi---SCRIPT-END---\n")
+	opts := clientOpts(url)
+	opts.Passthrough = map[string]json.RawMessage{
+		"temperature": json.RawMessage("0.2"),
+		"provider":    json.RawMessage(`{"order":["a"],"allow_fallbacks":false}`),
+	}
+	got, err := completions.Complete(context.Background(), opts, testMessages)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	assertEqual(t, "content", got, "---SCRIPT-START---\necho hi---SCRIPT-END---\n")
+
+	req := f.LastRequest()
+	assertEqual(t, "temperature", req["temperature"], any(0.2))
+	assertEqual(t, "provider", any(req["provider"]), any(map[string]any{
+		"order":           []any{"a"},
+		"allow_fallbacks": false,
+	}))
 }
 
 func TestCompleteHTTPError(t *testing.T) {
