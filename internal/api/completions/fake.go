@@ -28,7 +28,7 @@ import (
 
 // FakeLLM is a tiny completions-compatible HTTP server that answers
 // POST /v1/chat/completions with a canned response. It exists so tests can
-// exercise the full client without a real model API — fast, deterministic,
+// exercise the full client without a real model API - fast, deterministic,
 // no API key, no network.
 //
 // The server records every request body it receives, giving tests precise

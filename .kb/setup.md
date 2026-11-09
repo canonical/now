@@ -1,7 +1,9 @@
 # Preface
 
 This document describes the `now` configuration file
-(`$HOME/.now.cnf`): the cnf layout of providers and models, the
+(`$NOW_HOME/now.cnf` when set, else
+`$XDG_CONFIG_HOME/now/now.cnf`): the cnf
+layout of providers and models, the
 resolution into a runtime `Options`, and the legacy `.now`
 migration. The OpenRouter section covers provider routing in
 particular, since that is where most of the routing subtlety lives.
@@ -9,8 +11,9 @@ particular, since that is where most of the routing subtlety lives.
 The file is cnf, parsed via `cnfembed.ToJSON` and decoded with
 `encoding/json` + `DisallowUnknownFields` - so any unknown key at
 any depth is a load-time error. A leftover `$HOME/.now` in the old
-flat `key=value` format is converted to `.now.cnf` and removed on
-the first `Load`, comments carried over.
+flat `key=value` format is converted to the new location on the
+first `Load`, comments carried over, and the old file is left
+holding a note pointing at the new one.
 
 IMPORTANT: Read the .kb/agents.md file.
 
@@ -98,9 +101,19 @@ empty, through its provider into the flat `Options`
 client. The `-m` option passes its key through; `-m` twice is an
 ambiguous parse error.
 
+The configuration path is `$NOW_HOME/now.cnf` when `$NOW_HOME` is
+set to a non-empty value, else `$XDG_CONFIG_HOME/now/now.cnf`
+where `$XDG_CONFIG_HOME` defaults to `~/.config` - `DefaultPath`
+resolves it the same way, so the proposed sample script lands on
+the effective path (creating the directory when needed). A set
+`$NOW_HOME` is used exclusively: a missing `now.cnf` under it is an
+error, with no silent fallback to the default location, and the
+legacy `.now` migration never runs for it.
+
 ## Legacy migration
 
-When `.now.cnf` is absent but a flat `$HOME/.now` exists,
+When the configuration file is absent at the default location but a
+flat `$HOME/.now` exists,
 `internal/setup` converts it once: parse the old `key=value` file
 (unknown key or malformed line aborts), render it as cnf with the
 endpoint pairs inside `providers.local` and the comments carried
@@ -108,9 +121,12 @@ over (leading whitespace trimmed - cnf rejects an indented comment
 before the first pair), then the old `api-model` value becomes
 `models.default.provider-model`. The candidate content is parsed
 back and compared field-by-field before anything is written; only
-then temp file + rename (mode 0600) and the old file is removed.
-Any failure leaves both files as they were. When `.now.cnf`
-exists, `.now` is never touched.
+then the target directory is created on demand, temp file + rename
+(mode 0600), and the old file is replaced with a one-line note -
+`# Configuration migrated: <path>` - pointing at the new file.
+Any failure leaves both files as they were. When the new file
+exists, `.now` is never touched. `$NOW_HOME` disables the migration
+entirely.
 
 
 ## OpenRouter

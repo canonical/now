@@ -43,7 +43,7 @@ type Options struct {
 	// otherwise an empty read-only directory is mounted in its place:
 	// the path exists at the same location as outside, so relative
 	// paths look natural, but its content is invisible without a
-	// grant — reads fail with ENOENT and writes fail loudly with
+	// grant - reads fail with ENOENT and writes fail loudly with
 	// EROFS rather than silently succeeding in a throwaway tmpfs
 	// whose contents are discarded. Empty leaves the working
 	// directory wherever bwrap starts it, usually /.
@@ -87,8 +87,8 @@ type pathBind struct {
 	flags bindFlags
 }
 
-// orderBinds sorts binds shallow-first — a deeper path always mounts
-// on top of a shallower one, which is how bwrap composes mounts —
+// orderBinds sorts binds shallow-first - a deeper path always mounts
+// on top of a shallower one, which is how bwrap composes mounts -
 // with lexicographic order breaking depth ties so the result is
 // deterministic. It is the single ordering authority: every bind
 // source feeds through it, so emission order is correct regardless of
@@ -110,28 +110,28 @@ func orderBinds(binds []pathBind) []pathBind {
 // the sandbox:
 //
 //   - ELF binaries: the loader directories and cache via ldd's
-//     transitive resolution — each "lib => /path" line and the bare
+//     transitive resolution - each "lib => /path" line and the bare
 //     loader line contribute the directory of the resolved file.
 //   - Scripts (ldd reports "not a dynamic executable"): the shebang
-//     interpreter chain — the interpreter path is bound and resolved
+//     interpreter chain - the interpreter path is bound and resolved
 //     recursively (it may itself be a wrapper script), depth-capped.
 //     An "/usr/bin/env NAME" shebang binds the env binary as written
 //     plus NAME resolved from the host $PATH; env's own runtime
 //     lookup then finds it through the inherited host PATH, which by
 //     construction contains the directory NAME was resolved from.
-//   - Always: the conventional trees — /lib, /lib64, /usr/lib,
+//   - Always: the conventional trees - /lib, /lib64, /usr/lib,
 //     /usr/local/lib, plus the multiarch pair /lib/<triplet> and
 //     /usr/lib/<triplet> derived from the binary's own GOARCH at
-//     compile time — the classic homes of loader symlinks, interpreter
+//     compile time - the classic homes of loader symlinks, interpreter
 //     runtime data (python's stdlib, node modules, perl lib), and
 //     platform-specific libs, which no ldd-style probe can discover
-//     — plus /etc/ld.so.cache, which the loader reads before the dirs.
+//     - plus /etc/ld.so.cache, which the loader reads before the dirs.
 //     This is a deliberate, bounded slice of over-binding: the same
 //     reasoning that added /usr/lib for interpreter data covers the
 //     multiarch dirs, and the compile-time table keeps them correct
 //     per architecture without external reads.
 //
-// An ldd failure on one binary is skipped non-fatally — the probe's
+// An ldd failure on one binary is skipped non-fatally - the probe's
 // real bwrap run fails loudly if something needed is missing. A
 // script whose shebang interpreter does not exist is a hard error,
 // though: the command cannot run at all, and naming the interpreter
@@ -146,7 +146,7 @@ func discoverReadable(binaries []string) ([]string, error) {
 	// /lib and /lib64 are the canonical loader symlink roots: the
 	// kernel walks PT_INTERP literally (/lib64/ld-linux...), and on
 	// merged-usr systems those are symlinks into /usr/lib whose
-	// relative targets resolve through /lib — ldd only ever reports
+	// relative targets resolve through /lib - ldd only ever reports
 	// the resolved /usr paths, so the symlink view must be bound
 	// explicitly or the loader is unreachable despite being "bound".
 	// The multiarch pair joins the same conventional set: the classic
@@ -215,7 +215,7 @@ func (d *discovery) add(path string) {
 // shebang up to the depth cap. The cap limits how far the chain is
 // followed, not what is bound: the entry at the cap depth is bound,
 // but its own interpreter is not resolved. A shebang naming an
-// interpreter that does not exist or is not executable is an error —
+// interpreter that does not exist or is not executable is an error -
 // the script cannot run either way, and the message names the
 // interpreter.
 func (d *discovery) discover(binaries []string, depth int) error {
@@ -226,7 +226,7 @@ func (d *discovery) discover(binaries []string, depth int) error {
 		d.add(bin)
 		out, err := exec.Command("ldd", bin).Output()
 		if err != nil {
-			// Not an ELF binary — or ldd failed. A script is
+			// Not an ELF binary - or ldd failed. A script is
 			// followed through its shebang; anything else is
 			// skipped non-fatally.
 			interp, err := d.discoverShebang(bin)
@@ -268,7 +268,7 @@ func (d *discovery) discover(binaries []string, depth int) error {
 // a direct path yields that path; an "/usr/bin/env NAME" shebang
 // yields the env binary as written plus NAME resolved from the host
 // $PATH. An empty result means the file is not a script. Extra
-// shebang arguments are ignored — they do not change which binaries
+// shebang arguments are ignored - they do not change which binaries
 // are needed. Every named interpreter must exist and be executable:
 // the script cannot run otherwise, and the error names the
 // interpreter and the script.
@@ -323,7 +323,7 @@ func (d *discovery) discoverShebang(script string) ([]string, error) {
 // real Options through bwrap with a trivial command: if the fresh procfs
 // mounts, that is the preferred form; if the environment denies that
 // mount specifically, the host's /proc is bound read-only instead. Any
-// other failure means confining is impossible and is an error — better
+// other failure means confining is impossible and is an error - better
 // before the script is generated and reviewed than after its approval.
 //
 // Probe also discovers the loader directories, cache, and shebang
@@ -398,7 +398,7 @@ func Probe(opts Options, cmdpath string, binaries ...string) (Options, error) {
 //
 // The fresh procfs from --proc is what busybox applets need: they re-exec
 // themselves through /proc/self/exe. Where the environment denies that
-// mount — restricted containers — the host's /proc is bound read-only
+// mount - restricted containers - the host's /proc is bound read-only
 // instead, which keeps applets working at the cost of exposing the
 // host's process list to the script.
 func Args(opts Options, cmdpath string, cmdargs ...string) ([]string, error) {
@@ -432,7 +432,7 @@ func Args(opts Options, cmdpath string, cmdargs ...string) ([]string, error) {
 	// trailing separator. Symlinked paths claim both the link and
 	// its resolved target: the kernel and loader look up literal
 	// paths (a shebang names /usr/bin/env; PT_INTERP names
-	// /lib64/ld-linux...), so the link path must be bound — and the
+	// /lib64/ld-linux...), so the link path must be bound - and the
 	// target must be bound too, or the link dangles inside where its
 	// target directory does not exist. bwrap's bind of a symlink
 	// source copies the target content, which covers both when the
@@ -492,7 +492,7 @@ func Args(opts Options, cmdpath string, cmdargs ...string) ([]string, error) {
 // temp mounts a fresh empty tmpfs over the path, write without temp
 // binds read-write, and plain read binds read-only. The read-only
 // remount for temp+read paths is emitted separately by Args, after
-// the whole sequence — --remount-ro is non-recursive and needs the
+// the whole sequence - --remount-ro is non-recursive and needs the
 // parent writable while deeper binds mount under it. A bind with no
 // claims emits nothing.
 func emitBind(args []string, b pathBind) []string {
@@ -518,7 +518,7 @@ func bindsFrom(set map[string]bindFlags) []pathBind {
 }
 
 // coveredBy reports whether the path is at or below any bind in the
-// set — the question the ungranted-cwd placeholder asks. Grants are
+// set - the question the ungranted-cwd placeholder asks. Grants are
 // absolute paths from the parser.
 func coveredBy(set map[string]bindFlags, path string) bool {
 	for dir := range set {

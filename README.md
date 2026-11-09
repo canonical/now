@@ -103,7 +103,9 @@ Boolean flags may be bundled together.
 
 If you run _now_ without a valid configuration, it will propose a script for creating it.
 
-The configuration is loaded from `$HOME/.now.cnf` in the [cnf](https://github.com/canonical/cnf) format:
+The configuration is loaded from `$NOW_HOME/now.cnf` if `$NOW_HOME` is set, or from
+`$XDG_CONFIG_HOME/now/now.cnf` otherwise, where `$XDG_CONFIG_HOME` defaults to `~/.config`,
+in the [cnf](https://github.com/canonical/cnf) format:
 ```
 providers.local:
     api-url: "http://127.0.0.1:11434"

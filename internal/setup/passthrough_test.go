@@ -59,7 +59,7 @@ func assertPassthrough(t *testing.T, got map[string]json.RawMessage, want map[st
 }
 
 func TestPassthroughNone(t *testing.T) {
-	withHome(t, passthroughConfig("", ""))
+	withConfig(t, passthroughConfig("", ""))
 	cfg, err := setup.Load("")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -70,7 +70,7 @@ func TestPassthroughNone(t *testing.T) {
 }
 
 func TestPassthroughProviderOnly(t *testing.T) {
-	withHome(t, passthroughConfig(
+	withConfig(t, passthroughConfig(
 		"        temperature: 0.2\n", ""))
 	cfg, err := setup.Load("")
 	if err != nil {
@@ -80,7 +80,7 @@ func TestPassthroughProviderOnly(t *testing.T) {
 }
 
 func TestPassthroughModelOverridesProvider(t *testing.T) {
-	withHome(t, passthroughConfig(
+	withConfig(t, passthroughConfig(
 		"        temperature: 0.9\n"+
 			"        max-tokens: 4096\n",
 		"        temperature: 0.2\n"))
@@ -97,7 +97,7 @@ func TestPassthroughModelOverridesProvider(t *testing.T) {
 func TestPassthroughDeepMerge(t *testing.T) {
 	// The provider defaults and the model pin the order, nested
 	// in the same provider object - the OpenRouter shape.
-	withHome(t, passthroughConfig(
+	withConfig(t, passthroughConfig(
 		"        provider:\n"+
 			"            allow-fallbacks: false\n"+
 			"            data-collection: \"deny\"\n",
@@ -120,7 +120,7 @@ func TestPassthroughDeepMergeNested(t *testing.T) {
 	// Two levels down: both sides hold nested maps, and the merge
 	// must combine the inner leaves rather than replace the whole
 	// nested object.
-	withHome(t, passthroughConfig(
+	withConfig(t, passthroughConfig(
 		"        outer:\n"+
 			"            inner:\n"+
 			"                from-provider: 1\n"+
@@ -148,7 +148,7 @@ func TestPassthroughDeepMergeNested(t *testing.T) {
 
 func TestPassthroughScalarReplacesMap(t *testing.T) {
 	// Over always wins the shape, in both directions.
-	withHome(t, passthroughConfig(
+	withConfig(t, passthroughConfig(
 		"        provider:\n"+
 			"            order: [\"a\"]\n",
 		"        provider: \"pinned\"\n"))
@@ -162,7 +162,7 @@ func TestPassthroughScalarReplacesMap(t *testing.T) {
 func TestPassthroughMapOntoScalar(t *testing.T) {
 	// The model map replaces the provider scalar wholesale: over
 	// always wins the shape, in both directions.
-	withHome(t, passthroughConfig(
+	withConfig(t, passthroughConfig(
 		"        provider: \"pinned\"\n",
 		"        provider:\n"+
 			"            order: [\"a\"]\n"))
@@ -179,7 +179,7 @@ func TestPassthroughModelOverridden(t *testing.T) {
 	// The passthrough may set a key the client owns - here model -
 	// but the request carries the resolved one: the client's own
 	// fields are written after the passthrough.
-	withHome(t, passthroughConfig(
+	withConfig(t, passthroughConfig(
 		"        model: \"hijacked\"\n", ""))
 	cfg, err := setup.Load("")
 	if err != nil {

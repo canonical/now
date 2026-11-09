@@ -43,7 +43,8 @@ type RunOptions struct {
 	// script for review, prompts, and errors.
 	Stdout io.Writer
 	Stderr io.Writer
-	// SetupPath selects the configuration file; empty means $HOME/.now.cnf.
+	// SetupPath selects the configuration file; empty means the default
+	// ($NOW_HOME/now.cnf, or $XDG_CONFIG_HOME/now/now.cnf).
 	SetupPath string
 	// TTY overrides where approval is read from; the controlling
 	// terminal by default. A test seam, like ApprovalOptions.TTY.
@@ -55,8 +56,9 @@ type RunOptions struct {
 // key is a commented placeholder, so an unedited sample fails loading
 // with the honest missing-key error.
 const sampleScript = `
-# CONFIGURATION IS MISSING: This script creates a sample at $HOME/.now.cnf
-
+# CONFIGURATION IS MISSING: This script creates a sample at:
+# $XDG_CONFIG_HOME/now/now.cnf
+mkdir -p "$(dirname "$1")"
 cat > "$1" <<'END'
 #providers.local:
 #	api-url: "http://127.0.0.1:11434"
@@ -66,7 +68,8 @@ cat > "$1" <<'END'
 #models.default:
 #	provider: "local"
 END
-echo "Sample configuration saved, adjust as necessary: $1"
+echo "Sample configuration saved, adjust as necessary:"
+echo "$1"
 `
 
 // ErrAborted is returned when the user rejects the script at approval.

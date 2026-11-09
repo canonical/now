@@ -13,8 +13,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-// Package setup loads the now configuration from $HOME/.now.cnf,
-// migrating the previous $HOME/.now file when found.
+// Package setup loads the now configuration from $NOW_HOME/now.cnf
+// when set, else $XDG_CONFIG_HOME/now/now.cnf, migrating the previous
+// $HOME/.now file when found.
 package setup
 
 import (
@@ -67,46 +68,64 @@ type modelConfig struct {
 	Passthrough   map[string]json.RawMessage `json:"passthrough"`
 }
 
-// Load reads the configuration from $HOME/.now.cnf and resolves
-// the given model name. An empty name selects models.default.
-// A leftover $HOME/.now is converted to .now.cnf and then removed.
+// configPath resolves the configuration file path: $NOW_HOME/now.cnf
+// when $NOW_HOME is set, else $XDG_CONFIG_HOME/now/now.cnf, where
+// $XDG_CONFIG_HOME defaults to ~/.config.
+func configPath() (string, error) {
+	if home := os.Getenv("NOW_HOME"); home != "" {
+		return filepath.Join(home, "now.cnf"), nil
+	}
+	dir, err := os.UserConfigDir()
+	if err != nil {
+		return "", fmt.Errorf("cannot discover configuration directory: %w", err)
+	}
+	return filepath.Join(dir, "now", "now.cnf"), nil
+}
+
+// Load reads the configuration and resolves the given model name. An
+// empty name selects models.default. The path is $NOW_HOME/now.cnf
+// when $NOW_HOME is set - used exclusively, with no legacy migration -
+// else the default location, where a leftover $HOME/.now is converted
+// and left holding a note pointing at the new file.
 func Load(model string) (*Options, error) {
+	path, err := configPath()
+	if err != nil {
+		return nil, err
+	}
+	if os.Getenv("NOW_HOME") != "" {
+		return LoadFrom(path, model)
+	}
+	return loadDefault(path, model)
+}
+
+// loadDefault picks the configuration at the default path: the cnf
+// file when present, else a migrated $HOME/.now, else a not-exist
+// error named after the default path so the sample lands on it.
+func loadDefault(path, model string) (*Options, error) {
+	if _, err := os.Stat(path); err == nil {
+		return LoadFrom(path, model)
+	} else if !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("cannot open %s: %w", path, err)
+	}
+
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("cannot discover home directory: %w", err)
 	}
-	return loadHome(home, model)
-}
-
-// loadHome picks the configuration under the given home directory:
-// .now.cnf when present, else a migrated .now, else a not-exist error
-// named after .now.cnf so the sample lands on the new path.
-func loadHome(home, model string) (*Options, error) {
-	newPath := filepath.Join(home, ".now.cnf")
 	oldPath := filepath.Join(home, ".now")
-
-	if _, err := os.Stat(newPath); err == nil {
-		return LoadFrom(newPath, model)
-	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("cannot open %s: %w", newPath, err)
-	}
-
 	if _, err := os.Stat(oldPath); err == nil {
-		return migrate(oldPath, newPath, model)
+		return migrate(oldPath, path, model)
 	} else if !errors.Is(err, fs.ErrNotExist) {
-		return nil, fmt.Errorf("cannot open %s: %w", newPath, err)
+		return nil, fmt.Errorf("cannot open %s: %w", oldPath, err)
 	}
 
-	return nil, fmt.Errorf("cannot open %s: %w", newPath, fs.ErrNotExist)
+	return nil, fmt.Errorf("cannot open %s: %w", path, fs.ErrNotExist)
 }
 
-// DefaultPath is the configuration file path, $HOME/.now.cnf.
+// DefaultPath is the configuration file path: $NOW_HOME/now.cnf when
+// $NOW_HOME is set, else $XDG_CONFIG_HOME/now/now.cnf.
 func DefaultPath() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("cannot discover home directory: %w", err)
-	}
-	return filepath.Join(home, ".now.cnf"), nil
+	return configPath()
 }
 
 // LoadFrom reads the configuration in cnf format from the given

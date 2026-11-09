@@ -94,8 +94,9 @@ func renderLegacy(lines []legacyLine) []byte {
 // migrate converts the old key=value file at oldPath into a cnf
 // file at newPath, resolves the given model name - always
 // models.default today, the only entry a converted file holds -
-// and removes the old file once the new one is fully written and
-// verified. On any failure the old file is left as it was.
+// and replaces the old file with a migration note once the new one
+// is fully written and verified. On any failure the old file is
+// left as it was.
 func migrate(oldPath, newPath, model string) (*Options, error) {
 	fail := func(format string, args ...any) (*Options, error) {
 		return nil, fmt.Errorf("cannot migrate %s to %s: %s", oldPath, newPath, fmt.Sprintf(format, args...))
@@ -127,7 +128,12 @@ func migrate(oldPath, newPath, model string) (*Options, error) {
 	}
 
 	// Write the verified content to a temporary file next to the
-	// target, then move it into place and drop the old file.
+	// target, then move it into place and leave a note where the old
+	// file was. The parent directory is created on demand: the
+	// default location nests under the configuration directory.
+	if err := os.MkdirAll(filepath.Dir(newPath), 0o700); err != nil {
+		return fail("cannot create configuration directory: %v", err)
+	}
 	tmp, err := os.CreateTemp(filepath.Dir(newPath), ".now-migrate-*")
 	if err != nil {
 		return fail("cannot create temporary file: %v", err)
@@ -147,8 +153,12 @@ func migrate(oldPath, newPath, model string) (*Options, error) {
 	if err := os.Rename(tmpName, newPath); err != nil {
 		return fail("cannot move temporary file into place: %v", err)
 	}
-	// Ignore errors at this point. The new file is in place.
-	_ = os.Remove(oldPath)
+	// The new file is in place. Leave a note in the old file instead
+	// of deleting it, pointing at where the configuration now lives.
+	// A failure here is harmless: the new file is already in place and
+	// wins from now on, so at worst a stale legacy file remains.
+	note := fmt.Sprintf("# Configuration migrated: %s\n", newPath)
+	_ = os.WriteFile(oldPath, []byte(note), 0o600)
 	return newOpts, nil
 }
 

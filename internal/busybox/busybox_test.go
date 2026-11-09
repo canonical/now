@@ -62,7 +62,7 @@ func TestProbeDropsBracketApplets(t *testing.T) {
 	// The [ and [[ applets are dropped: they are shell builtins the
 	// model knows well, so listing them in the prompt is pure noise.
 	// static-sh is dropped too: an alias for the shell itself. Other
-	// applets stay listed — the model is told to use only the allowed
+	// applets stay listed - the model is told to use only the allowed
 	// commands, so removing one it might legitimately emit risks it
 	// avoiding valid shell.
 	fakeBusybox(t, "#!/bin/sh\necho sh [ [[ static-sh cat\n")

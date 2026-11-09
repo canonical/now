@@ -16,6 +16,7 @@
 package setup_test
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -25,21 +26,27 @@ import (
 )
 
 // withLegacy writes an old key=value .now file into a fresh temp
-// home and points $HOME there.
-func withLegacy(t *testing.T, content string) string {
+// home and points $HOME there, with $XDG_CONFIG_HOME at a second
+// temp dir holding no configuration. NOW_HOME is cleared so the
+// default location is the one under test even when the environment
+// sets it. It returns the home and the XDG configuration directories.
+func withLegacy(t *testing.T, content string) (home, xdg string) {
 	t.Helper()
-	dir := t.TempDir()
+	home = t.TempDir()
+	xdg = t.TempDir()
 	if content != "" {
-		if err := os.WriteFile(filepath.Join(dir, ".now"), []byte(content), 0o600); err != nil {
+		if err := os.WriteFile(filepath.Join(home, ".now"), []byte(content), 0o600); err != nil {
 			t.Fatalf("writing legacy config: %v", err)
 		}
 	}
-	t.Setenv("HOME", dir)
-	return dir
+	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("NOW_HOME", "")
+	return home, xdg
 }
 
 func TestMigrate(t *testing.T) {
-	dir := withLegacy(t, ""+
+	home, xdg := withLegacy(t, ""+
 		"# main settings\n"+
 		"api-url=http://127.0.0.1:11434\n"+
 		"\n"+
@@ -58,7 +65,8 @@ func TestMigrate(t *testing.T) {
 		APIType:  "completions-v1",
 	})
 
-	data, err := os.ReadFile(filepath.Join(dir, ".now.cnf"))
+	newPath := filepath.Join(xdg, "now", "now.cnf")
+	data, err := os.ReadFile(newPath)
 	if err != nil {
 		t.Fatalf("reading migrated config: %v", err)
 	}
@@ -74,11 +82,15 @@ func TestMigrate(t *testing.T) {
 		"    provider-model: \"foobar\"\n"
 	assertEqual(t, "migrated content", string(data), want)
 
-	if _, err := os.Stat(filepath.Join(dir, ".now")); !os.IsNotExist(err) {
-		t.Fatalf("legacy file still present after migration")
+	// The legacy file is not removed: it holds a note pointing at
+	// where the configuration now lives.
+	note, err := os.ReadFile(filepath.Join(home, ".now"))
+	if err != nil {
+		t.Fatalf("reading legacy file: %v", err)
 	}
+	assertEqual(t, "legacy note", string(note), fmt.Sprintf("# Configuration migrated: %s\n", newPath))
 
-	info, err := os.Stat(filepath.Join(dir, ".now.cnf"))
+	info, err := os.Stat(newPath)
 	if err != nil {
 		t.Fatalf("stat migrated config: %v", err)
 	}
@@ -86,12 +98,15 @@ func TestMigrate(t *testing.T) {
 }
 
 func TestMigrateNewFileWins(t *testing.T) {
-	dir := withLegacy(t, "api-url=http://old\n")
+	home, xdg := withLegacy(t, "api-url=http://old\n")
 	newContent := "providers.local:\n" +
 		"    api-url: \"http://new\"\n" +
 		"\nmodels.default:\n" +
 		"    provider: \"local\"\n"
-	if err := os.WriteFile(filepath.Join(dir, ".now.cnf"), []byte(newContent), 0o600); err != nil {
+	if err := os.MkdirAll(filepath.Join(xdg, "now"), 0o700); err != nil {
+		t.Fatalf("creating config dir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(xdg, "now", "now.cnf"), []byte(newContent), 0o600); err != nil {
 		t.Fatalf("writing config: %v", err)
 	}
 	cfg, err := setup.Load("")
@@ -99,43 +114,47 @@ func TestMigrateNewFileWins(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	assertEqual(t, "APIURL", cfg.APIURL, "http://new")
-	if _, err := os.Stat(filepath.Join(dir, ".now")); err != nil {
-		t.Fatalf("legacy file must be left alone when .now.cnf exists: %v", err)
+	// The legacy file must be left alone, content included, when the
+	// new file already exists.
+	data, err := os.ReadFile(filepath.Join(home, ".now"))
+	if err != nil {
+		t.Fatalf("reading legacy file: %v", err)
 	}
+	assertEqual(t, "legacy content", string(data), "api-url=http://old\n")
 }
 
 func TestMigrateBadLegacy(t *testing.T) {
-	dir := withLegacy(t, "api-url\n")
+	home, xdg := withLegacy(t, "api-url\n")
 	_, err := setup.Load("")
 	if err == nil || !strings.Contains(err.Error(), "expected key=value") {
 		t.Fatalf("expected legacy parse error, got %v", err)
 	}
-	if _, err2 := os.Stat(filepath.Join(dir, ".now")); err2 != nil {
+	if _, err2 := os.Stat(filepath.Join(home, ".now")); err2 != nil {
 		t.Fatalf("legacy file must be kept on failure: %v", err2)
 	}
-	if _, err2 := os.Stat(filepath.Join(dir, ".now.cnf")); !os.IsNotExist(err2) {
-		t.Fatalf("failed migration must not create .now.cnf")
+	if _, err2 := os.Stat(filepath.Join(xdg, "now", "now.cnf")); !os.IsNotExist(err2) {
+		t.Fatalf("failed migration must not create the new config")
 	}
 }
 
 func TestMigrateUnknownKey(t *testing.T) {
-	dir := withLegacy(t, "api-url=http://x\napi-toke=y\n")
+	home, _ := withLegacy(t, "api-url=http://x\napi-toke=y\n")
 	_, err := setup.Load("")
 	if err == nil || !strings.Contains(err.Error(), "unknown key") {
 		t.Fatalf("expected unknown key error, got %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".now")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, ".now")); err != nil {
 		t.Fatalf("legacy file must be kept on failure: %v", err)
 	}
 }
 
 func TestMigrateMissingAPIURL(t *testing.T) {
-	dir := withLegacy(t, "api-key=abc...\n")
+	home, _ := withLegacy(t, "api-key=abc...\n")
 	_, err := setup.Load("")
 	if err == nil || !strings.Contains(err.Error(), "has no api-url") {
 		t.Fatalf("expected api-url error, got %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(dir, ".now")); err != nil {
+	if _, err := os.Stat(filepath.Join(home, ".now")); err != nil {
 		t.Fatalf("legacy file must be kept on failure: %v", err)
 	}
 }

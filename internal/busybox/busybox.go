@@ -33,7 +33,7 @@ type Options struct {
 
 // Probe resolves busybox in $PATH and captures its applet list. The
 // prompt promises the model a busybox environment, so a missing busybox
-// is an error — better before the model is called than when the
+// is an error - better before the model is called than when the
 // approved script fails to run.
 //
 // When Options is already filled, Probe returns it immediately, so
@@ -57,7 +57,7 @@ func Probe(opts Options) (Options, error) {
 	// builtins the model knows well and needs no guidance on, so
 	// listing them in the prompt is pure noise. static-sh is dropped
 	// too: it is an alias for the shell itself, never a command a
-	// script would intend to invoke. Everything else stays listed —
+	// script would intend to invoke. Everything else stays listed -
 	// the model is told to use only the allowed commands, so removing
 	// an applet it might legitimately emit risks it avoiding valid
 	// shell.

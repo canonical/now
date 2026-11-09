@@ -143,7 +143,7 @@ invalidate the prelude's reason.
 ## End-to-end via temp setup files
 
 The cycle tests (`cli/run_test.go`) do not stub configuration: they
-write a real `$HOME/.now.cnf` (cnf format) to a temp path and pass
+write a real cnf configuration to a temp path and pass
 it as `RunOptions.SetupPath`, pointing the provider's `api-url` at
 the fake server. This exercises real config loading and resolution
 - a stub would hide format drift. `SetupPath` exists as a public

@@ -334,9 +334,11 @@ func TestRunSampleConfigOffer(t *testing.T) {
 	// A missing configuration with a human reviewing scripts offers the
 	// sample script through the normal approval cycle; on approval the
 	// file is written and the script prints the pointer to it. No model
-	// call happens.
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	// call happens. The now/ directory does not exist yet, so the sample
+	// script must create it.
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("NOW_HOME", "")
 
 	var stdout, stderr strings.Builder
 	err := cli.Run(context.Background(), cli.RunOptions{
@@ -350,7 +352,8 @@ func TestRunSampleConfigOffer(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	data, err := os.ReadFile(filepath.Join(home, ".now.cnf"))
+	samplePath := filepath.Join(xdg, "now", "now.cnf")
+	data, err := os.ReadFile(samplePath)
 	if err != nil {
 		t.Fatalf("cannot read sample: %v", err)
 	}
@@ -370,13 +373,16 @@ func TestRunSampleConfigOffer(t *testing.T) {
 	if !strings.Contains(stderr.String(), "adjust as necessary") {
 		t.Errorf("sample script not shown for review: %q", stderr.String())
 	}
-	assertEqual(t, "stdout", stdout.String(), "Sample configuration saved, adjust as necessary: "+filepath.Join(home, ".now.cnf")+"\n")
+	// The path lands on its own line: the script prints the label and
+	// the destination separately, so a long path never wraps oddly.
+	assertEqual(t, "stdout", stdout.String(), "Sample configuration saved, adjust as necessary:\n"+samplePath+"\n")
 }
 
 func TestRunSampleConfigCancel(t *testing.T) {
 	// Declining the sample script leaves nothing behind.
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("NOW_HOME", "")
 
 	var stdout, stderr strings.Builder
 	err := cli.Run(context.Background(), cli.RunOptions{
@@ -389,7 +395,7 @@ func TestRunSampleConfigCancel(t *testing.T) {
 	if !errors.Is(err, cli.ErrAborted) {
 		t.Fatalf("expected ErrAborted, got %v", err)
 	}
-	if _, err := os.Stat(filepath.Join(home, ".now.cnf")); !os.IsNotExist(err) {
+	if _, err := os.Stat(filepath.Join(xdg, "now", "now.cnf")); !os.IsNotExist(err) {
 		t.Errorf("sample written despite cancel")
 	}
 }
@@ -472,8 +478,8 @@ func TestRunFormatMissingConfigErrors(t *testing.T) {
 	// In write mode a missing configuration is a hard error: the
 	// propose-sample fallback would have to run, and write mode
 	// never runs anything.
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("NOW_HOME", "")
 
 	var stdout, stderr strings.Builder
 	err := cli.Run(context.Background(), cli.RunOptions{
@@ -582,8 +588,9 @@ func TestRunFormatShArgsAreData(t *testing.T) {
 func TestRunSampleConfigNotOfferedUnattended(t *testing.T) {
 	// -y (and -q) get the plain missing-config error, not the offer:
 	// the side channel only exists with a human reviewing scripts.
-	home := t.TempDir()
-	t.Setenv("HOME", home)
+	xdg := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", xdg)
+	t.Setenv("NOW_HOME", "")
 
 	var stdout, stderr strings.Builder
 	err := cli.Run(context.Background(), cli.RunOptions{
@@ -599,7 +606,7 @@ func TestRunSampleConfigNotOfferedUnattended(t *testing.T) {
 	if strings.Contains(stderr.String(), "adjust as necessary") {
 		t.Errorf("sample offered despite -y: %q", stderr.String())
 	}
-	if _, err2 := os.Stat(filepath.Join(home, ".now.cnf")); !os.IsNotExist(err2) {
+	if _, err2 := os.Stat(filepath.Join(xdg, "now", "now.cnf")); !os.IsNotExist(err2) {
 		t.Errorf("sample written despite -y")
 	}
 }

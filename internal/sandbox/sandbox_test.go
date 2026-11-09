@@ -504,7 +504,7 @@ func TestWrapNestedReadInsideWrite(t *testing.T) {
 }
 
 func TestWrapInterleavedThreeLevels(t *testing.T) {
-	// The full interleaving case: rw /a, ro /a/b, rw /a/b/c — the
+	// The full interleaving case: rw /a, ro /a/b, rw /a/b/c - the
 	// emission must interleave bind kinds by depth, which separate
 	// ro/rw loops cannot express.
 	requireBwrap(t)

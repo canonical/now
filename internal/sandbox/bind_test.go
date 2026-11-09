@@ -150,7 +150,7 @@ func TestTripletFor(t *testing.T) {
 
 func TestDiscoverReadableInjectsClassics(t *testing.T) {
 	// The conventional set must actually include the classic library
-	// directories — the injection, not just the map. A static binary
+	// directories - the injection, not just the map. A static binary
 	// keeps the output to the conventional set alone, so the dirs are
 	// directly observable.
 	fakeLdd(t, t.TempDir(), map[string]string{
@@ -387,7 +387,7 @@ func TestDiscoverReadableDepthCap(t *testing.T) {
 	s1 := writeScript(t, dir, "s1", "#!"+s2, "x")
 	s0 := writeScript(t, dir, "s0", "#!"+s1, "x")
 	got := mustDiscover(t, []string{s0})
-	// Depth 0: s0; 1: s1; 2: s2 — the cap stops before s3's interpreter.
+	// Depth 0: s0; 1: s1; 2: s2 - the cap stops before s3's interpreter.
 	assertEqual(t, "readable", got, []string{
 		s0, s1, s2, s3,
 		"/lib", "/lib64", "/lib/x86_64-linux-gnu", "/usr/lib", "/usr/lib/x86_64-linux-gnu", "/usr/local/lib", "/etc/ld.so.cache",

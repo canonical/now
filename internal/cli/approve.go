@@ -45,8 +45,8 @@ type ApprovalOptions struct {
 //
 // With Yes or Quiet, the script is approved without asking; Quiet
 // additionally hides it. Otherwise the user is asked on the controlling
-// terminal — read from /dev/tty rather than stdin, so a "-" placeholder
-// consuming piped stdin does not interfere — to press ENTER to approve;
+// terminal - read from /dev/tty rather than stdin, so a "-" placeholder
+// consuming piped stdin does not interfere - to press ENTER to approve;
 // any other input, EOF, or an interrupt cancels. Without a controlling
 // terminal there is no way to ask, so approval fails as an error.
 //
