@@ -146,6 +146,25 @@ interplay between these two concerns (applet preference vs `$PATH`
 resolution) is documented in `.kb/busybox.md`; the trap is treating
 them as one problem.
 
+### Applet aliases on non-standalone builds
+
+When `Busybox.Standalone` is false, ash resolves bare applet names
+through `$PATH` - a failure inside the sandbox, a wrong binary
+outside it. `Run` then also prepends `alias <name>='<busybox>
+<name>'` for the applets the script actually uses. Aliasing all
+~300 applets was rejected as waste; instead each applet name is
+cheaply scanned for in the script (`strings.Index`, then a
+word-boundary check) and only whole-word hits get an alias. The
+boundary set is `[A-Za-z0-9_/.-]` - hyphen, slash and dot count as
+word-ish so `run-parts` does not match `run` and `foo.tar`/
+`/bin/tar` do not match `tar`. Excluded from aliasing: the `-c`
+commands (their aliases already won) and the shell builtins from
+`busybox ash -c help` (aliasing `cd` would fork it into a
+subprocess). The alias value is single-quoted because it contains
+a space; ash tokenizes it, so `tar -xf f` still works. On standalone
+builds the whole procedure is skipped - ash's internal applet table
+already wins over `$PATH`.
+
 ## Execution mechanics
 
 - The script travels on **stdin** (`busybox sh -t? -e -s`) - no

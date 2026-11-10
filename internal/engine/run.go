@@ -21,6 +21,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 
 	"github.com/canonical/now/internal/busybox"
@@ -77,8 +78,8 @@ func Run(ctx context.Context, script string, opts RunOptions) error {
 	// exactly that, and actually breaks tests. Aliases are expanded
 	// at parse time, so the prelude must run before the group is
 	// parsed: put it first, then the group.
-	aliases := aliasPrelude(opts.Commands)
-	script = aliases + "{\n" + script + "\n} <&9 9<&-\n";
+	aliases := aliasPrelude(script, opts.Busybox, opts.Commands)
+	script = aliases + "{\n" + script + "\n} <&9 9<&-\n"
 
 	// -e aborts on the first failing command, so a half-executed
 	// script never reads as success.
@@ -162,15 +163,94 @@ func stdinFile(r io.Reader) (f *os.File, cleanup func(), err error) {
 	return pr, cleanup, nil
 }
 
-// aliasPrelude returns shell lines aliasing every allowed command to its
-// absolute path. Shadowing ones must win over the busybox applets, and
-// inside the sandbox the others would not resolve through $PATH at all -
-// so all commands are aliased uniformly, granting exactly what the user
-// resolved at parse time.
-func aliasPrelude(commands []prompt.Command) string {
+// aliasPrelude returns shell lines aliasing every allowed command to
+// its absolute path. Shadowing ones must win over the busybox applets,
+// and inside the sandbox the others would not resolve through $PATH at
+// all - so all commands are aliased uniformly, granting exactly what
+// the user resolved at parse time.
+//
+// On a non-standalone build, ash resolves bare applet names through
+// $PATH too, so the applets the script actually uses are aliased to
+// "busybox <name>" - see the applet loop below.
+func aliasPrelude(script string, bopts busybox.Options, commands []prompt.Command) string {
 	var b strings.Builder
 	for _, c := range commands {
 		b.WriteString("alias " + c.Name + "=" + c.Path + "\n")
 	}
+	if bopts.Standalone {
+		// ash checks its applet table before $PATH, so bare applet
+		// names already resolve in-process.
+		return b.String()
+	}
+
+	// The shell builtins (which must run in-process) are never
+	// aliased. Both lists arrive sorted from Probe, so a plain walk
+	// suffices: the builtin index advances while its name sorts
+	// before the applet and stops at the first that does not - a
+	// match means skip, a pass means clear. The -c commands (whose
+	// aliases already won) are a short user-granted list, checked
+	// linearly on the rare applet that gets this far.
+	bi := 0
+	for _, name := range bopts.Applets {
+		for bi < len(bopts.Builtins) && bopts.Builtins[bi] < name {
+			bi++
+		}
+		if bi < len(bopts.Builtins) && bopts.Builtins[bi] == name {
+			continue
+		}
+		if !containsWord(script, name) {
+			continue
+		}
+		if slices.ContainsFunc(commands, func(c prompt.Command) bool {
+			return c.Name == name
+		}) {
+			continue
+		}
+		// The value contains a space, so it needs quoting; ash
+		// tokenizes the alias value, so "tar -xf f" still works.
+		b.WriteString("alias " + name + "='" + bopts.Path + " " + name + "'\n")
+	}
 	return b.String()
+}
+
+// containsWord reports whether name occurs in s as a whole word: the
+// bytes around the match must fall outside the word-ish set, which
+// includes - / and . so run-parts does not match run, and foo.tar or
+// /bin/tar do not match tar.
+func containsWord(s, name string) bool {
+	for i := 0; i+len(name) <= len(s); {
+		j := strings.Index(s[i:], name)
+		if j < 0 {
+			return false
+		}
+		i += j
+		if !wordishBefore(s, i) && !wordishAfter(s, i+len(name)) {
+			return true
+		}
+		i += len(name)
+	}
+	return false
+}
+
+// wordByte reports whether c can appear inside a word.
+func wordByte(c byte) bool {
+	switch {
+	case c >= 'a' && c <= 'z', c >= 'A' && c <= 'Z', c >= '0' && c <= '9':
+		return true
+	case c == '_' || c == '/' || c == '.' || c == '-':
+		return true
+	}
+	return false
+}
+
+// wordishBefore reports whether the byte just before position i is
+// part of a word, so no word boundary sits at i.
+func wordishBefore(s string, i int) bool {
+	return i > 0 && wordByte(s[i-1])
+}
+
+// wordishAfter reports whether the byte at position i is part of a
+// word, so no word boundary sits at i.
+func wordishAfter(s string, i int) bool {
+	return i < len(s) && wordByte(s[i])
 }

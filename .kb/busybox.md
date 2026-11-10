@@ -93,6 +93,22 @@ every `-c` command before the script text, uniformly (not only the
 shadowing ones) - uniformity means each granted command runs exactly
 the binary resolved at parse time.
 
+## The standalone probe and `Builtins`
+
+`static-sh` in `--list` is the compile-time signal of
+`CONFIG_FEATURE_SH_STANDALONE`: `Probe` captures it as
+`Options.Standalone` before dropping the name from `Applets`. On a
+non-standalone build ash resolves bare applet names through `$PATH`,
+so `Run` also aliases the used applets to `busybox <name>` (see the
+alias prelude in `.kb/engine.md`). That aliasing must never touch
+shell builtins - `alias cd=...` would fork `cd` into a subprocess -
+so `Probe` also captures `Options.Builtins` from the shell's own
+`help` output (`busybox ash -c help`), keeping the from-the-installed-
+build law: a hardcoded builtin list would drift. The help output's
+header lines are skipped by taking only tab-indented lines. When
+`Standalone` is true the builtins probe is skipped entirely - nothing
+downstream needs it.
+
 ## The `/proc/self/exe` dependency (NOEXEC applets)
 
 Applets re-exec themselves through `/proc/self/exe` - the NOEXEC subset

@@ -39,6 +39,39 @@ func mustBusybox(t *testing.T) busybox.Options {
 	return opts
 }
 
+func TestContainsWord(t *testing.T) {
+	// The word-ish set includes - / and .: run-parts must not match
+	// run, foo.tar and /bin/tar must not match tar. Anything else
+	// around the name counts as a boundary.
+	tests := []struct {
+		script string
+		name   string
+		want   bool
+	}{
+		{"tar -xf f", "tar", true},
+		{"echo tar", "tar", true},
+		{"tar", "tar", true},
+		{"a tar!", "tar", true},
+		{"tar.tar", "tar", false},
+		{"ustar", "tar", false},
+		{"tarp", "tar", false},
+		{"/bin/tar", "tar", false},
+		{"run-parts", "run", false},
+		{"my_tar", "tar", false},
+		{"tar2", "tar", false},
+		{"xtar tar", "tar", true},
+		{"taar taar", "tar", false},
+		{"see-the-tar", "tar", false},
+		{"", "tar", false},
+		{"cat", "tar", false},
+	}
+	for _, test := range tests {
+		if got := engine.ContainsWord(test.script, test.name); got != test.want {
+			t.Errorf("ContainsWord(%q, %q) = %v, want %v", test.script, test.name, got, test.want)
+		}
+	}
+}
+
 func TestRunOutputsAndArgs(t *testing.T) {
 	var out, errOut bytes.Buffer
 	err := engine.Run(context.Background(), `for a in "$@"; do echo "arg: $a"; done`, engine.RunOptions{
@@ -183,8 +216,8 @@ func TestRunStopsAtFirstFailure(t *testing.T) {
 	var out bytes.Buffer
 	err := engine.Run(context.Background(), "false\necho after >&2", engine.RunOptions{
 		Busybox: mustBusybox(t),
-		Stdout: &out,
-		Stderr: &out,
+		Stdout:  &out,
+		Stderr:  &out,
 	})
 	if err == nil || !strings.Contains(err.Error(), "script failed") {
 		t.Fatalf("expected run error, got %v", err)
@@ -198,8 +231,8 @@ func TestRunScriptFailure(t *testing.T) {
 	var out bytes.Buffer
 	err := engine.Run(context.Background(), "echo before\necho oops >&2\nexit 3", engine.RunOptions{
 		Busybox: mustBusybox(t),
-		Stdout: &out,
-		Stderr: &out,
+		Stdout:  &out,
+		Stderr:  &out,
 	})
 	if err == nil || !strings.Contains(err.Error(), "script failed") {
 		t.Fatalf("expected run error, got %v", err)
@@ -214,9 +247,9 @@ func TestRunTrace(t *testing.T) {
 	var out, errOut bytes.Buffer
 	err := engine.Run(context.Background(), "echo hi", engine.RunOptions{
 		Busybox: mustBusybox(t),
-		Stdout: &out,
-		Stderr: &errOut,
-		Trace:  true,
+		Stdout:  &out,
+		Stderr:  &errOut,
+		Trace:   true,
 	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -240,8 +273,8 @@ func TestRunAliasesAppletShadowingCommand(t *testing.T) {
 	var out bytes.Buffer
 	err := engine.Run(context.Background(), "echo hello", engine.RunOptions{
 		Busybox: mustBusybox(t),
-		Stdout:   &out,
-		Stderr:   &out,
+		Stdout:  &out,
+		Stderr:  &out,
 		Commands: []prompt.Command{
 			{Name: "echo", Path: path, Help: ""},
 		},
@@ -296,7 +329,7 @@ func TestRunAliasesAllCommands(t *testing.T) {
 	err := engine.Run(context.Background(), "jq filter", engine.RunOptions{
 		Busybox: mustBusybox(t),
 		Stdout:  &out,
-		Stderr: &out,
+		Stderr:  &out,
 		Commands: []prompt.Command{
 			{Name: "jq", Path: path, Help: ""},
 		},
@@ -316,4 +349,138 @@ func TestRunCanceled(t *testing.T) {
 	if err == nil || !strings.Contains(err.Error(), "script failed") {
 		t.Fatalf("expected run error, got %v", err)
 	}
+}
+
+// fakeNonStandaloneBusybox writes a fake busybox into a temp dir that
+// is also the whole $PATH: it serves the shell by exec'ing /bin/sh and
+// logs every other applet invocation, so tests can observe exactly
+// which names the applet prelude aliased. A name that is neither
+// aliased nor a shell builtin resolves nowhere - the honest failure
+// the prelude exists to prevent.
+func fakeNonStandaloneBusybox(t *testing.T, applets, builtins []string) (busybox.Options, string) {
+	t.Helper()
+	dir := t.TempDir()
+	log := filepath.Join(dir, "log")
+	path := filepath.Join(dir, "busybox")
+	script := "#!/bin/sh\ncase \"$1\" in sh) shift; exec /bin/sh \"$@\";; *) echo \"$1\" >> \"" + log + "\";; esac\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("cannot write fake busybox: %v", err)
+	}
+	t.Setenv("PATH", dir)
+	return busybox.Options{
+		Path:       path,
+		Applets:    applets,
+		Builtins:   builtins,
+		Standalone: false,
+	}, log
+}
+
+// readLog returns the applet names the fake busybox was invoked with;
+// no log at all means no applet was invoked.
+func readLog(t *testing.T, log string) []string {
+	t.Helper()
+	data, err := os.ReadFile(log)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		t.Fatalf("cannot read applet log: %v", err)
+	}
+	return strings.Fields(string(data))
+}
+
+func TestRunAliasesUsedAppletsOnNonStandaloneBuild(t *testing.T) {
+	// Without FEATURE_SH_STANDALONE, ash resolves bare applet names
+	// through $PATH - so the used ones are aliased to "busybox <name>"
+	// and resolve even when $PATH holds nothing else.
+	opts, log := fakeNonStandaloneBusybox(t, []string{"foo", "bar"}, []string{"cd"})
+	var out bytes.Buffer
+	err := engine.Run(context.Background(), "foo\n", engine.RunOptions{
+		Busybox: opts,
+		Stdout:  &out,
+		Stderr:  &out,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v (stderr: %q)", err, out.String())
+	}
+	assertEqual(t, "applet log", readLog(t, log), []string{"foo"})
+}
+
+func TestRunSkipsAppletAliasesOnStandaloneBuild(t *testing.T) {
+	// A standalone build needs no applet aliases: ash resolves applet
+	// names from its internal table. The unused bar is proof enough,
+	// but foo is used and still must not be aliased - that is the
+	// skip this test pins.
+	opts, log := fakeNonStandaloneBusybox(t, []string{"foo"}, []string{"cd"})
+	opts.Standalone = true
+	var out bytes.Buffer
+	err := engine.Run(context.Background(), "foo\n", engine.RunOptions{
+		Busybox: opts,
+		Stdout:  &out,
+		Stderr:  &out,
+	})
+	if err == nil || !strings.Contains(out.String(), "not found") {
+		t.Fatalf("expected not-found failure without applet aliases, got err %v, output %q", err, out.String())
+	}
+	assertEqual(t, "applet log", readLog(t, log), []string(nil))
+}
+
+func TestRunAppletAliasesSkipBuiltins(t *testing.T) {
+	// Builtins run in-process; aliasing cd, say, would fork it into a
+	// subprocess and silently break scripts. A name listed both as
+	// applet and builtin gets no alias.
+	opts, log := fakeNonStandaloneBusybox(t, []string{"foo"}, []string{"foo"})
+	var out bytes.Buffer
+	err := engine.Run(context.Background(), "foo\n", engine.RunOptions{
+		Busybox: opts,
+		Stdout:  &out,
+		Stderr:  &out,
+	})
+	if err == nil || !strings.Contains(out.String(), "not found") {
+		t.Fatalf("expected not-found failure for builtin-skipped applet, got err %v, output %q", err, out.String())
+	}
+	assertEqual(t, "applet log", readLog(t, log), []string(nil))
+}
+
+func TestRunAppletAliasesNeedWholeWord(t *testing.T) {
+	// An applet name embedded in a longer word (foobar) is not a use
+	// of the applet: no alias, and the word resolves on its own.
+	opts, log := fakeNonStandaloneBusybox(t, []string{"bar"}, []string{"cd"})
+	var out bytes.Buffer
+	err := engine.Run(context.Background(), "foobar\n", engine.RunOptions{
+		Busybox: opts,
+		Stdout:  &out,
+		Stderr:  &out,
+	})
+	if err == nil || !strings.Contains(out.String(), "not found") {
+		t.Fatalf("expected not-found failure for embedded word, got err %v, output %q", err, out.String())
+	}
+	assertEqual(t, "applet log", readLog(t, log), []string(nil))
+}
+
+func TestRunCommandAliasWinsOverApplet(t *testing.T) {
+	// A -c command sharing the applet's name keeps its own alias -
+	// the granted binary is what runs, never the applet.
+	dir := t.TempDir()
+	path := filepath.Join(dir, "foo")
+	script := "#!/bin/sh\necho REAL-FOO \"$@\"\n"
+	if err := os.WriteFile(path, []byte(script), 0o755); err != nil {
+		t.Fatalf("cannot write command: %v", err)
+	}
+
+	opts, log := fakeNonStandaloneBusybox(t, []string{"foo"}, []string{"cd"})
+	var out bytes.Buffer
+	err := engine.Run(context.Background(), "foo hi", engine.RunOptions{
+		Busybox: opts,
+		Stdout:  &out,
+		Stderr:  &out,
+		Commands: []prompt.Command{
+			{Name: "foo", Path: path, Help: ""},
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v (stderr: %q)", err, out.String())
+	}
+	assertEqual(t, "stdout", out.String(), "REAL-FOO hi\n")
+	assertEqual(t, "applet log", readLog(t, log), []string(nil))
 }
