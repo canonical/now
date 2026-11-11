@@ -27,6 +27,19 @@ AI for sensitive terminal environments in a classic way.
   - [Arbitrary content summary](#arbitrary-content-summary)
 - [License](#license)
 
+## Updates
+
+### Version 1.1
+
+- Configuration moved to ~/.config/now/ or $NOW_HOME, migrates automatically.
+- Configuration format is now [cnf](https://github.com/canonical/cnf).
+- New -m option for multi-model support in [configuration](#configuration).
+- New -p option for reading prompts from file.
+- New -i option for reading arguments from one or more files.
+- Renamed tracing option to -x (same as shell).
+- New -t option is an alias of -f=plaintext.
+
+
 ## Overview
 
 The command is a single binary named **now**, written in Go with no dependencies outside of the standard library, that
