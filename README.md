@@ -4,6 +4,7 @@ AI for sensitive terminal environments in a classic way.
 
 ## Contents
 
+- [Updates](#updates)
 - [Overview](#overview)
 - [Usage](#usage)
 - [Configuration](#configuration)
@@ -35,10 +36,9 @@ AI for sensitive terminal environments in a classic way.
 - Configuration format is now [cnf](https://github.com/canonical/cnf).
 - New -m option for multi-model support in [configuration](#configuration).
 - New -p option for reading prompts from file.
-- New -i option for reading arguments from one or more files.
+- New -i option for attaching text files as references for the model.
 - Renamed tracing option to -x (same as shell).
 - New -t option is an alias of -f=plaintext.
-
 
 ## Overview
 
